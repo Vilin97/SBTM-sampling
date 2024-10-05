@@ -23,6 +23,7 @@ diffrax
 matplotlib
 pandas
 optax
+flax
 
 
 # Install the current package
