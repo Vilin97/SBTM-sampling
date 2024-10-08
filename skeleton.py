@@ -15,20 +15,27 @@ What do I want from the code?
 - everything should be on the GPU
 - use Flax for NNs
 """
+import jax.numpy as jnp
+import jax.random as jrandom
+
+class Logger:
+    def log(self, **kwargs):
+        pass
 
 # Main class to sample
 class Sampler:
-    particles # jnp array of particles
-    target_score # target score function
-    step_size # delta t
-    max_steps # maximum number of steps
-    logger # logger object
+    def __init__(self, particles, target_score, step_size, max_steps, logger):
+        self.particles = particles  # jnp array of particles
+        self.target_score = target_score  # target score function
+        self.step_size = step_size  # delta t
+        self.max_steps = max_steps  # maximum number of steps
+        self.logger = logger  # logger object
 
     def sample(self):
         """Sample from the target distribution"""
-        for _ in range(self.max_steps):
+        for step_number in range(self.max_steps):
             self.step()
-            logger.log(...)
+            self.logger.log(particles=self.particles, step_number=step_number, score=self.target_score(self.particles))
 
         return self.particles
 
@@ -39,16 +46,26 @@ class Sampler:
 
 class SDESampler(Sampler):
     """Langevin dynamics sampler"""
-    
+
+    def __init__(self, particles, target_score, step_size, max_steps, logger, seed=0):
+        super().__init__(particles, target_score, step_size, max_steps, logger)
+        self.key = jrandom.PRNGKey(seed)
+
     def step(self):
         """Draw brownian noise Z and move particles in direction target_score - sqrt(2)Z"""
-        particles += step_size * target_score(particles) + sqrt(2 * step_size) * random.normal()
-        pass
+        dim = self.particles.shape[1]
+        noise = jrandom.multivariate_normal(self.key, jnp.zeros_like(self.particles), jnp.eye(dim))
+        drift = self.target_score(self.particles)
+        self.particles += self.step_size * drift + jnp.sqrt(2 * self.step_size) * noise
+
+
 
 
 class ODESampler(Sampler):
     """Deterministic sampler"""
-    score_model # a model to approximate grad-log-density, e.g. a NN
+    def __init__(self, particles, target_score, step_size, max_steps, logger, score_model):
+        super().__init__(particles, target_score, step_size, max_steps, logger)
+        self.score_model = score_model  # a model to approximate grad-log-density, e.g. a NN
 
     def step(self):
         """Train the score model and move particles in direction target_score - score_model(particles)"""
@@ -61,6 +78,11 @@ class SBTMSampler(ODESampler):
 
 class SVGDSampler(ODESampler):
     """Use RKHS to approximate the score"""
+
+# Logger class to log target score, step_size, max-steps, step number, particle locations, predicted score, score model. Should have method `log`.
+class Logger:
+    def log(self, **kwargs):
+        pass
 
 # ScoreModel class to approximate the score function. It should have methods `fit` and `predict`. `predict` is the forward pass of the model. `fit` should fit the model given particle locations. The class is inherited by NNScoreModel and RKHSScoreModel. NNScoreModel should contain a Flax model, a loss, an optimizer, and a callable `stop_gd` that stops the gradient descent (it can perform a fixed number of GD steps or implement a more sophisticated stopping criterion). RKHSScoreModel should contain the kernel function.
 class ScoreModel:
@@ -95,14 +117,7 @@ class RKHSScoreModel(ScoreModel):
     def predict(self, particles):
         pass
 
-
-# Logger class to log target score, step_size, max-steps, step number, particle locations, predicted score, score model. Should have method `log`.
-class Logger:
-    def log(self, **kwargs):
-        pass
-
-
-# Experiment class to orchestrate running a single experiment. It should take a `config` dict. It should have methods `run` and `compute_metrics`. `run` should load the model (or train a new one if not available), init the sampler, run the sampler, and save the config and the results. `compute_metrics` should load the results, compute metrics and save the metrics. `plot_metrics` should load the metrics, plot them, and save the plots. 
+# Experiment class to orchestrate running a single experiment. It should take a `config` dict. It should have methods `run` and `compute_metrics`. `run` should load the model (or train a new one if not available), init the sampler, run the sampler, and save the config and the results. `compute_metrics` should load the results, compute metrics and save the metrics. `plot_metrics` should load the metrics, plot them, and save the plots.
 class Experiment:
     def __init__(self, config):
         self.config = config
@@ -130,7 +145,3 @@ class DataManager:
 
     def load_plot(self, filename):
         pass
-
-
-
-
