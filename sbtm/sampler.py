@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax.random as jrandom
 import equinox as eqx
 from tqdm import tqdm
+import optax
 
 
 class Logger:
@@ -67,15 +68,39 @@ class ODESampler(Sampler):
     """Deterministic sampler"""
 
 
-class SBTMSampler(Sampler):
+class SBTMSampler(ODESampler):
     """Use a NN to approximate the score"""
 
-    def __init__(self, particles, target_score, step_size, max_steps, logger, score_model):
-        super().__init__(particles, target_score, step_size, max_steps, logger)
-        self.score_model = score_model  # a model to approximate grad-log-density, e.g. a NN
+    score_model: eqx.Module  # a model to approximate grad-log-density, e.g. a NN
+    loss: callable  # loss function to minimize at each step
+    optimizer: optax.GradientTransformation  # optimizer for training the model
+    opt_state: optax.OptState  # state of the optimizer
 
-    # assume that the score model has already been pre-trained
-    # TODO: implement SBTM
+    def __init__(self, particles, target_score, step_size, max_steps, logger, score_model, loss, optimizer):
+        super().__init__(particles, target_score, step_size, max_steps, logger)
+        self.score_model = score_model
+        self.loss = loss
+        self.optimizer = optimizer
+        self.opt_state = self.optimizer.init(self.score_model)
+
+    def step(self):
+        """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
+        loss_values = []
+        for _ in range(10):  # Perform 10 optimization steps
+            loss_value = self.opt_step()
+            loss_values.append(loss_value)
+        score = self.score_model(self.particles)
+        velocity = self.step_size * (self.target_score(self.particles) - score)
+        self.particles += velocity
+        return {'score': score, 'velocity': velocity, 'loss_values': loss_values}
+
+    @eqx.filter_jit
+    def opt_step(self):
+        """Perform one step of optimization"""
+        loss_value, grads = jax.value_and_grad(self.loss)(self.score_model, self.particles)
+        updates, self.opt_state = self.optimizer.update(grads, self.opt_state)
+        self.score_model = eqx.apply_updates(self.score_model, updates)
+        return loss_value
 
 
 class SVGDSampler(ODESampler):
@@ -85,6 +110,7 @@ class SVGDSampler(ODESampler):
     kernel_width: float
 
     def __init__(self, particles, target_score, step_size, max_steps, logger, kernel_obj, kernel_width=-1.):
+        """If kernel_width is not passed, it is recomputed at each step"""
         super().__init__(particles, target_score, step_size, max_steps, logger)
         self.kernel_obj = kernel_obj
         self.kernel_width = kernel_width

@@ -2,6 +2,8 @@ import jax.numpy as jnp
 import jax.random as jrandom
 from sbtm import sampler, density, plots, kernel
 from sbtm.sampler import SDESampler, Logger
+from flax import nnx
+import optax
 
 import os
 os.environ["JAX_CHECK_TRACER_LEAKS"] = 'True'
@@ -33,3 +35,11 @@ svgd_sampler = sampler.SVGDSampler(prior_sample, target_score, step_size, max_st
 svgd_sample = svgd_sampler.sample()
 fig = plots.plot_distributions(prior_sample, svgd_sample, target_params)
 fig.show()
+
+# sample with sbtm
+sbtm_logger = Logger()
+# TODO: define the score model
+score_model = nnx.Model(target_score, prior_params)
+loss = lambda s, x: jnp.mean(jnp.sum(s(x)**2, axis=-1) + 2 * jnp.sum(jnp.gradient(s(x)), axis=-1))
+optimizer = nnx.Optimizer(score_model, optax.adamw(learning_rate=0.005, momentum=0.9))
+sbtm_sampler = sampler.SBTMSampler(prior_sample, target_score, step_size, max_steps, sbtm_logger, )
