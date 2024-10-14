@@ -20,8 +20,10 @@ class Kernel(eqx.Module):
         :type x: array
         :param y: Input 2
         :type y: array
+        :param width: Kernel width parameter
+        :type width: float
         :return: Gram matrix between x and y with the specified kernel
-        :rtype: array
+        :rtype: jax.numpy.ndarray
         """
         K = jax.vmap(lambda x1: jax.vmap(lambda y1: self.kernel_fun(x1, y1, width))(y))(x)
         return K
@@ -31,8 +33,10 @@ class Kernel(eqx.Module):
         Compute the gradient of the kernel with respect to the first argument.
         :param x: Input 1
         :type x: array
-        :param y: Input 2
-        :type y: array
+        :param width: Kernel width parameter
+        :type width: float
+        :return: Gradient of the kernel with respect to the first argument
+        :rtype: jax.numpy.ndarray
         :return: Gradient of the kernel with respect to the first argument
         :rtype: array
         """
