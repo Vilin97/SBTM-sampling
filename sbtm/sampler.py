@@ -86,6 +86,7 @@ class SBTMSampler(ODESampler):
     def step(self):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
         loss_values = []
+        # TODO: do not hardcode number of steps
         for _ in range(10):  # Perform 10 optimization steps
             loss_value = self.opt_step()
             loss_values.append(loss_value)
@@ -97,6 +98,7 @@ class SBTMSampler(ODESampler):
     @eqx.filter_jit
     def opt_step(self):
         """Perform one step of optimization"""
+        # TODO: use mini batches
         loss_value, grads = jax.value_and_grad(self.loss)(self.score_model, self.particles)
         updates, self.opt_state = self.optimizer.update(grads, self.opt_state)
         self.score_model = eqx.apply_updates(self.score_model, updates)
