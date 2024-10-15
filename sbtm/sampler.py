@@ -4,6 +4,7 @@ import jax.random as jrandom
 import equinox as eqx
 from tqdm import tqdm
 import optax
+from flax import nnx
 
 
 class Logger:
@@ -40,7 +41,6 @@ class Sampler:
 
         return self.particles
 
-    @eqx.filter_jit
     def step(self):
         """Take one step, e.g. predict score and move particles. Return a dictionary of values to log."""
         raise NotImplementedError("must be implemented by subclasses")
@@ -71,39 +71,52 @@ class ODESampler(Sampler):
 class SBTMSampler(ODESampler):
     """Use a NN to approximate the score"""
 
-    score_model: eqx.Module  # a model to approximate grad-log-density, e.g. a NN
+    score_model: nnx.Module  # a model to approximate grad-log-density, e.g. a NN
     loss: callable  # loss function to minimize at each step
     optimizer: optax.GradientTransformation  # optimizer for training the model
-    opt_state: optax.OptState  # state of the optimizer
+    mini_batch_size: int  # size of mini-batches
 
-    def __init__(self, particles, target_score, step_size, max_steps, logger, score_model, loss, optimizer):
+    def __init__(self, particles, target_score, step_size, max_steps, logger, score_model, loss, optimizer, mini_batch_size=200):
         super().__init__(particles, target_score, step_size, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
         self.optimizer = optimizer
-        self.opt_state = self.optimizer.init(self.score_model)
+        self.mini_batch_size = mini_batch_size
 
     def step(self):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
-        loss_values = []
-        # TODO: do not hardcode number of steps
-        for _ in range(10):  # Perform 10 optimization steps
-            loss_value = self.opt_step()
-            loss_values.append(loss_value)
+        loss_values = self.train_model()
         score = self.score_model(self.particles)
         velocity = self.step_size * (self.target_score(self.particles) - score)
         self.particles += velocity
         return {'score': score, 'velocity': velocity, 'loss_values': loss_values}
 
-    @eqx.filter_jit
-    def opt_step(self):
-        """Perform one step of optimization"""
-        # TODO: use mini batches
-        loss_value, grads = jax.value_and_grad(self.loss)(self.score_model, self.particles)
-        updates, self.opt_state = self.optimizer.update(grads, self.opt_state)
-        self.score_model = eqx.apply_updates(self.score_model, updates)
-        return loss_value
+    def train_model(self):
+        """Train the score model using mini-batches"""
+        loss_values = []
+        num_particles = self.particles.shape[0]
+        num_batches = num_particles // self.mini_batch_size
 
+        # TODO: do not hardcode number of steps
+        counter = 0
+        while counter < 100:
+            for i in range(num_batches):
+                counter += 1
+                batch_start = i * self.mini_batch_size
+                batch_end = batch_start + self.mini_batch_size
+                batch = self.particles[batch_start:batch_end, :]
+                loss_value = opt_step(self.score_model, self.optimizer, self.loss, batch)
+                loss_values.append(loss_value)
+        
+        return loss_values
+
+@nnx.jit(static_argnames='loss')
+def opt_step(model, optimizer, loss, batch):
+    """Perform one step of optimization"""
+    loss_value, grads = nnx.value_and_grad(loss)(model, batch)
+    optimizer.update(grads)
+    return loss_value
+    
 
 class SVGDSampler(ODESampler):
     """Use RKHS to approximate the velocity (target_score - score)"""
