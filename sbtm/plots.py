@@ -1,8 +1,8 @@
 import numpy as np
+import jax
 import matplotlib.pyplot as plt
-from scipy.stats import norm
 
-def plot_distributions(initial_particles, transported_particles, density_params):
+def plot_distributions(initial_particles, transported_particles, density_obj):
     fig = plt.figure(figsize=(10, 6))
 
     # Plot histogram of initial particles
@@ -14,10 +14,9 @@ def plot_distributions(initial_particles, transported_particles, density_params)
              color='g', histtype='bar', label='Transported Particles')
 
     # Plot the target density function
-    mean = density_params['mean'][0]
-    std_dev = np.sqrt(density_params['covariance'][0, 0])
-    x = np.linspace(mean - 4 * std_dev, mean + 4 * std_dev, 1000)
-    y = norm.pdf(x, mean, std_dev)
+    x = np.linspace(min(initial_particles + transported_particles) - 1, 
+                    max(initial_particles + transported_particles) + 1, 1000)
+    y = jax.vmap(density_obj.density)(x)
     plt.plot(x, y, 'r-', lw=2, label='Target Distribution')
 
     # plt.title('Initial and Final Distributions of Particles')

@@ -34,9 +34,9 @@ class Sampler:
     def sample(self):
         """Sample from the target distribution"""
         for step_number in tqdm(range(self.max_steps)):
-            to_log = self.step()
-            to_log['particles'] = self.particles
-            to_log['step_number'] = step_number
+            to_log = {'particles': self.particles, 'step_number': step_number}
+            step_log = self.step()
+            to_log.update(step_log)
             self.logger.log(to_log)
 
         return self.particles
