@@ -85,30 +85,32 @@ class SBTMSampler(ODESampler):
 
     def step(self):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
-        loss_values = self.train_model()
+        loss_values, batch_loss_values = self.train_model()
         score = self.score_model(self.particles)
         velocity = self.step_size * (self.target_score(self.particles) - score)
         self.particles += velocity
-        return {'score': score, 'velocity': velocity, 'loss_values': loss_values}
+        return {'score': score, 'velocity': velocity, 'loss_values': loss_values, 'batch_loss_values': batch_loss_values}
 
     def train_model(self):
         """Train the score model using mini-batches"""
+        batch_loss_values = []
         loss_values = []
         num_particles = self.particles.shape[0]
         num_batches = num_particles // self.mini_batch_size
 
         # TODO: do not hardcode number of steps
         counter = 0
-        while counter < 100:
+        while counter < 20:
+            loss_values.append(self.loss(self.score_model, self.particles))
             for i in range(num_batches):
                 counter += 1
                 batch_start = i * self.mini_batch_size
                 batch_end = batch_start + self.mini_batch_size
                 batch = self.particles[batch_start:batch_end, :]
                 loss_value = opt_step(self.score_model, self.optimizer, self.loss, batch)
-                loss_values.append(loss_value)
+                batch_loss_values.append(loss_value)
         
-        return loss_values
+        return loss_values, batch_loss_values
 
 @nnx.jit(static_argnames='loss')
 def opt_step(model, optimizer, loss, batch):

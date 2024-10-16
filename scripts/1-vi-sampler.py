@@ -6,8 +6,9 @@ import jax.random as jrandom
 from sbtm import density, plots, kernel, losses, models, sampler
 from flax import nnx
 import optax
-import os
-os.environ["JAX_CHECK_TRACER_LEAKS"] = 'True'
+# import os
+# os.environ["JAX_CHECK_TRACER_LEAKS"] = 'True'
+import matplotlib.pyplot as plt
 
 #%%
 # reload modules
@@ -17,16 +18,16 @@ for module in [density, plots, kernel, losses, models, sampler]:
 #%%
 # set up
 step_size = 0.1
-max_steps = 20
+max_steps = 50
 num_particles = 5000
 key = jrandom.key(42)
 
-prior_params = {'mean': jnp.array([0]), 'covariance': jnp.array([[10.]])}
+prior_params = {'mean': jnp.array([0.]), 'covariance': jnp.array([[10.]])}
 prior_sample = jrandom.multivariate_normal(key, prior_params['mean'], prior_params['covariance'], shape=(num_particles,))
 prior_score = density.Density(density.gaussian_pdf, prior_params).score
 
-target_params = {'mean': [jnp.array([-5]), jnp.array([5])], 'covariance': [jnp.array([[1.]]), jnp.array([[1.]])], 'weights': jnp.array([1/3, 2/3])}
-target_density_obj = density.Density(density.gaussian_mixture_pdf, target_params)
+target_params = {'mean': jnp.array([0.]), 'covariance': jnp.array([[1.]])}
+target_density_obj = density.Density(density.gaussian_pdf, target_params)
 target_score = target_density_obj.score
 
 #%%
@@ -47,17 +48,19 @@ fig = plots.plot_distributions(prior_sample, svgd_sample, target_density_obj)
 fig.show()
 
 #%%
-# sample with sbtm
-mlp = models.MLP(d=1)
+# train initial score model
+importlib.reload(losses)
+mlp = models.MLP(d=1, hidden_units=[128])
 score_model = models.ResNet(mlp)
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.001, 0.9))
-for i in range(100):
+for i in range(50):
     if i % 10 == 0:
         print(losses.explicit_score_matching_loss(score_model, prior_score, prior_sample))
     loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_score, prior_sample)
     optimizer.update(grads)
 print(losses.explicit_score_matching_loss(score_model, prior_score, prior_sample))
 #%%
+# sample with sbtm
 sbtm_logger = sampler.Logger()
 loss = losses.implicit_score_matching_loss
 sbtm_sampler = sampler.SBTMSampler(prior_sample, target_score, step_size, max_steps, sbtm_logger, score_model, loss, optimizer)
@@ -66,8 +69,8 @@ fig = plots.plot_distributions(prior_sample, sbtm_sample, target_density_obj)
 fig.show()
 
 # %%
-import matplotlib.pyplot as plt
 loss_values = [loss_value for log in sbtm_logger.logs for loss_value in log['loss_values']]
+batch_loss_values = [loss_value for log in sbtm_logger.logs for loss_value in log['batch_loss_values']]
 
 def exponential_moving_average(data, smoothing):
     ema = []
@@ -77,14 +80,28 @@ def exponential_moving_average(data, smoothing):
         ema.append(ema_current)
     return ema
 
-ema_losses = exponential_moving_average(loss_values, smoothing=0.98)
+ema_losses = exponential_moving_average(loss_values, smoothing=0.4)
+ema_batch_losses = exponential_moving_average(batch_loss_values, smoothing=0.95)
 
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 2, 1)
 plt.plot(loss_values, label='Losses')
-plt.plot(ema_losses, label='Exponential Moving Average', color='red')
+# plt.plot(ema_losses, label='Exponential Moving Average', color='red')
 plt.xlabel('Iteration')
 plt.ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i})||^2 + 2 \nabla \cdot s(x_{i})$')
 plt.title(r'Implicit loss through iterations')
 plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(batch_loss_values, label='Batch Losses')
+plt.plot(ema_batch_losses, label='Exponential Moving Average', color='red')
+plt.xlabel('Iteration')
+plt.ylabel(r'Batch Loss')
+plt.title(r'Batch loss through iterations')
+plt.legend()
+
+plt.tight_layout()
 plt.show()
 
 #%% 
@@ -99,15 +116,16 @@ for log in sbtm_logger.logs:
     value = jnp.mean(jax.vmap(fisher_divergence)(score, target_score(particles)))
     fisher_divs.append(value)
     
-plt.plot(fisher_divs)
+plt.plot(fisher_divs, label='Fisher Divergence')
+plt.yscale('log')
 plt.title('Fisher Divergence Estimate')
 plt.xlabel('Step')
 plt.ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i}) - \nabla \log \pi(x_{i})||^2$')
+plt.legend()
 plt.show()
 
 # %%
 import seaborn as sns
-import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
 
 def kde(x_values, logs):
