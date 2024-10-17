@@ -35,8 +35,12 @@ target_score = target_density_obj.score
 sde_logger = sampler.Logger()
 sde_sampler = sampler.SDESampler(prior_sample, target_score, step_size, max_steps, sde_logger)
 sde_sample = sde_sampler.sample()
-fig = plots.plot_distributions(prior_sample, sde_sample, target_density_obj)
+fig, ax = plots.plot_distributions(prior_sample, sde_sample, target_density_obj)
+ax.set_title('SDE')
+ax.set_xlim(-10, 10)
 fig.show()
+
+plots.plot_kl_divergence(sde_logger.get_trajectory('particles'), target_density_obj.density)
 
 #%%
 # sample with svgd
@@ -44,8 +48,12 @@ svgd_kernel = kernel.Kernel(kernel.rbf_kernel)
 svgd_logger = sampler.Logger()
 svgd_sampler = sampler.SVGDSampler(prior_sample, target_score, step_size, max_steps, svgd_logger, svgd_kernel)
 svgd_sample = svgd_sampler.sample()
-fig = plots.plot_distributions(prior_sample, svgd_sample, target_density_obj)
+fig, ax = plots.plot_distributions(prior_sample, svgd_sample, target_density_obj)
+ax.set_title('SVGD')
+ax.set_xlim(-10, 10)
 fig.show()
+
+plots.plot_kl_divergence(svgd_logger.get_trajectory('particles'), target_density_obj.density)
 
 #%%
 # train initial score model
@@ -65,8 +73,12 @@ sbtm_logger = sampler.Logger()
 loss = losses.implicit_score_matching_loss
 sbtm_sampler = sampler.SBTMSampler(prior_sample, target_score, step_size, max_steps, sbtm_logger, score_model, loss, optimizer)
 sbtm_sample = sbtm_sampler.sample()
-fig = plots.plot_distributions(prior_sample, sbtm_sample, target_density_obj)
+fig, ax = plots.plot_distributions(prior_sample, sbtm_sample, target_density_obj)
+ax.set_title('SBTM')
+ax.set_xlim(-10, 10)
 fig.show()
+
+plots.plot_kl_divergence(sbtm_logger.get_trajectory('particles'), target_density_obj.density)
 
 # %%
 loss_values = [loss_value for log in sbtm_logger.logs for loss_value in log['loss_values']]

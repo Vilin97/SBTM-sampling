@@ -15,6 +15,9 @@ class Logger:
 
     def log(self, to_log):
         self.logs.append(to_log)
+        
+    def get_trajectory(self, key):
+        return [log[key] for log in self.logs]
 
 
 class Sampler:
@@ -33,7 +36,7 @@ class Sampler:
 
     def sample(self):
         """Sample from the target distribution"""
-        for step_number in tqdm(range(self.max_steps)):
+        for step_number in tqdm(range(self.max_steps), desc="Sampling"):
             to_log = {'particles': self.particles, 'step_number': step_number}
             step_log = self.step()
             to_log.update(step_log)
