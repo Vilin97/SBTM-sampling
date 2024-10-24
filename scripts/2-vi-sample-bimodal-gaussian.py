@@ -1,6 +1,5 @@
 #%%
 import importlib
-import jax
 import jax.numpy as jnp
 import jax.random as jrandom
 from sbtm import density, plots, kernel, losses, models, sampler
@@ -83,7 +82,7 @@ plots.plot_kl_divergence(sbtm_logger.get_trajectory('particles'), target_density
 plots.plot_fisher_divergence(sbtm_logger.get_trajectory('particles'), sbtm_logger.get_trajectory('score'), target_score)
 
 #%%
-# Rollout: sample from noised target, use the sample as initial condition for less noised target, etc
+# Annealing: sample from noised target, use the sample as initial condition for less noised target, etc
 targets = []
 noise_levels = [15,9,4,2,1,0]
 for i in noise_levels:
@@ -113,21 +112,17 @@ for (i, target) in enumerate(targets):
     fig.show()
     prior_sample_i = sample
     
-# %%
 # plot trajectories
 plots.visualize_trajectories(logger.get_trajectory('particles')[::20], 'SBTM', particle_idxs=range(1))
 
-# %%
 # plot kl divergence
 plots.plot_kl_divergence(logger.get_trajectory('particles')[::10], target_density_obj.density)
 
-# %%
 # plot losses
 loss_values = [loss_value for log in logger.logs for loss_value in log['loss_values']]
 batch_loss_values = [loss_value for log in logger.logs for loss_value in log['batch_loss_values']]
 plots.plot_losses(loss_values, batch_loss_values)
 
-#%% 
 # plot fisher divergence
 plots.plot_fisher_divergence(logger.get_trajectory('particles')[::10], logger.get_trajectory('score')[::10], target_score)
 
