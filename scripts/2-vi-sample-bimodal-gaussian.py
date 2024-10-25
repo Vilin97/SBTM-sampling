@@ -62,10 +62,10 @@ score_model = models.ResNet(mlp)
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.001, 0.9))
 for i in range(100):
     if i % 10 == 0:
-        print(losses.explicit_score_matching_loss(score_model, prior_score, prior_sample))
+        print(losses.explicit_score_matching_loss(score_model, prior_sample, prior_score(prior_sample)))
     loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_score, prior_sample)
     optimizer.update(grads)
-print(losses.explicit_score_matching_loss(score_model, prior_score, prior_sample))
+print(losses.explicit_score_matching_loss(score_model, prior_sample, prior_score(prior_sample)))
 #%%
 # sample with sbtm
 sbtm_logger = sampler.Logger()

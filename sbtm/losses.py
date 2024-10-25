@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 from typing import Callable
+from flax import nnx
 
 def divergence(f: Callable, mode, n=100):
 
@@ -45,15 +46,15 @@ def divergence(f: Callable, mode, n=100):
             return jax.vmap(vJv)(jax.random.split(key, n)).mean()
         return jax.jit(div)
 
-def explicit_score_matching_loss(s, true_score, particles):
+@nnx.jit
+def explicit_score_matching_loss(s, particles, target_score_values):
     """
     Compute the score matching loss between the vector field s and the true score.
     1/n ∑ᵢ ||s(xᵢ) - ∇log f*(xᵢ)||²
     """
-    def loss(x):
-        return jnp.sum(jnp.square(s(x) - true_score(x)))
-    return jnp.mean(jax.vmap(loss)(particles))
+    return jnp.square(s(particles) - target_score_values).mean()
 
+@nnx.jit
 def implicit_score_matching_loss(s, particles):
     """
     Compute the implicit score matching loss for vector field s

@@ -39,7 +39,7 @@ for (score_model, loss) in zip([score_model_1, score_model_2], [losses.explicit_
     optimizer = nnx.Optimizer(score_model, optax.adamw(0.001))
     for i in range(101):
         if i % 10 == 0:
-            explicit_loss_value = losses.explicit_score_matching_loss(score_model, prior_score, prior_sample)
+            explicit_loss_value = losses.explicit_score_matching_loss(score_model, prior_sample, prior_score(prior_sample))
             implicit_loss_value = losses.implicit_score_matching_loss(score_model, prior_sample)
             print(f"Iteration {i}: Explicit Loss = {explicit_loss_value:.5f}, Implicit Loss = {implicit_loss_value:.2f}")
         
@@ -73,7 +73,7 @@ for score_model in [score_model_1, score_model_2]:
     optimizer = nnx.Optimizer(score_model, optax.adamw(0.001))
     for i in range(101):
         if i % 10 == 0:
-            explicit_loss_value = losses.explicit_score_matching_loss(score_model, prior_score, prior_sample)
+            explicit_loss_value = losses.explicit_score_matching_loss(score_model, prior_sample, prior_score(prior_sample))
             print(f"Iteration {i}: Explicit Loss = {explicit_loss_value:.5f}")
         
         loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_score, prior_sample)
