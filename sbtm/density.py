@@ -5,8 +5,8 @@ import equinox as eqx
 
 
 class Density(eqx.Module):
-    """ General Density class for a given probability density function.
-    """
+    """General Density class for a given probability density function."""
+
     pdf_fun: callable
     params: dict
 
@@ -21,24 +21,25 @@ class Density(eqx.Module):
         return jax.vmap(self.density)(x)
 
     def score(self, x):
-        log_density = lambda x: jnp.clip(jnp.log(self.density(x)),
-                                         a_min=-1e10,
-                                         a_max=1e10)
+        log_density = lambda x: jnp.clip(jnp.log(self.density(x)), a_min=-1e10, a_max=1e10)
         score_fun = jax.grad(log_density, argnums=0)
         return jax.vmap(score_fun)(x)
 
+
 # Define a unimodal gaussian pdf
 def gaussian_pdf(x, params):
-    mean = params['mean']
-    cov = params['covariance']
+    mean = params["mean"]
+    cov = params["covariance"]
     return multivariate_normal.pdf(x, mean, cov)
 
+
 def linear_FPE_pdf(x, params):
-    time = params['time']
-    dim = params['dimension']
+    time = params["time"]
+    dim = params["dimension"]
     mean = jnp.zeros(dim)
     cov = 1 - jnp.exp(-2 * time) * jnp.identity(dim)
     return multivariate_normal.pdf(x, mean=mean, cov=cov)
+
 
 # define a bimodal gaussian
 def gaussian_mixture_pdf(x, params):
@@ -63,14 +64,13 @@ def gaussian_mixture_pdf(x, params):
     """
 
     # params
-    mean = params['mean']
-    cov = params['covariance']
-    weights = params['weights']
+    mean = params["mean"]
+    cov = params["covariance"]
+    weights = params["weights"]
     num_components = weights.shape[0]
 
     # Compute the PDF of each component
-    component_pdfs = jnp.array([multivariate_normal.pdf(x, mean[k], cov[k])
-                                for k in range(num_components)])
+    component_pdfs = jnp.array([multivariate_normal.pdf(x, mean[k], cov[k]) for k in range(num_components)])
 
     # Weighted sum of the component PDFs
     pdf = jnp.dot(weights, component_pdfs)
