@@ -5,11 +5,12 @@ import equinox as eqx
 from tqdm import tqdm
 import optax
 from flax import nnx
+import optimistix as optx
 
 
 class Logger:
-    """Logger class to log target score, step_size, max-steps, step number, particle locations, predicted score, score model. Should have method `log`."""
-
+    """Logger class to log target score, step_sizes, max-steps, step number, particle locations, predicted score, score model. Should have method `log`."""
+    # TODO: add hyperaparameters to the logger, logged at the beginning of the simulation
     def __init__(self):
         self.logs = []
 
@@ -23,14 +24,14 @@ class Logger:
 class Sampler:
     particles: jnp.array  # transported particles
     target_score: callable  # target score function
-    step_size: float  # time discretization
+    step_sizes: float  # time discretization
     max_steps: int  # maximum number of steps
     logger: Logger  # logger object
 
-    def __init__(self, particles, target_score, step_size, max_steps, logger):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger):
         self.particles = particles
         self.target_score = target_score
-        self.step_size = step_size
+        self.step_sizes = [step_sizes] * max_steps if isinstance(step_sizes, (int, float)) else step_sizes
         self.max_steps = max_steps
         self.logger = logger
 
@@ -38,9 +39,11 @@ class Sampler:
         """Sample from the target distribution"""
         for step_number in tqdm(range(self.max_steps), desc="Sampling"):
             to_log = {'particles': self.particles, 'step_number': step_number}
-            step_log = self.step()
+            step_log = self.step(step_number)
             to_log.update(step_log)
             self.logger.log(to_log)
+            if jnp.isnan(self.particles).any():
+                raise ValueError(f"Instability detected at step {step_number}")
 
         return self.particles
 
@@ -52,17 +55,17 @@ class Sampler:
 class SDESampler(Sampler):
     """Langevin dynamics sampler"""
 
-    def __init__(self, particles, target_score, step_size, max_steps, logger, seed=0):
-        super().__init__(particles, target_score, step_size, max_steps, logger)
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, seed=0):
+        super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.key = jrandom.key(seed)
 
-    def step(self):
+    def step(self, step_number):
         """Equation (4) in https://arxiv.org/pdf/1907.05600"""
         self.key, subkey = jrandom.split(self.key)
         n, dim = self.particles.shape
         noise = jrandom.multivariate_normal(subkey, jnp.zeros((n, dim)), jnp.eye(dim))
         drift = self.target_score(self.particles)
-        velocity = self.step_size * drift + jnp.sqrt(2 * self.step_size) * noise
+        velocity = self.step_sizes[step_number] * drift + jnp.sqrt(2 * self.step_sizes[step_number]) * noise
         self.particles += velocity
         return {'noise': noise, 'velocity': velocity}
 
@@ -79,19 +82,24 @@ class SBTMSampler(ODESampler):
     optimizer: optax.GradientTransformation  # optimizer for training the model
     mini_batch_size: int  # size of mini-batches
 
-    def __init__(self, particles, target_score, step_size, max_steps, logger, score_model, loss, optimizer, mini_batch_size=200):
-        super().__init__(particles, target_score, step_size, max_steps, logger)
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, mini_batch_size=200):
+        super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
         self.optimizer = optimizer
         self.mini_batch_size = mini_batch_size
 
-    def step(self):
+    def step(self, step_number):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
         loss_values, batch_loss_values = self.train_model()
         score = self.score_model(self.particles)
-        velocity = self.step_size * (self.target_score(self.particles) - score)
+        velocity = self.step_sizes[step_number] * (self.target_score(self.particles) - score)
         self.particles += velocity
+        # Below is the Backward Euler step but it only works for steps size <~ 0.9
+        # def fn(x, args):
+        #     return self.particles + self.step_sizes[step_number] * (self.target_score(x) + self.score_model(x))
+
+        # self.particles = optx.fixed_point(fn, optx.FixedPointIteration(rtol=1e-4, atol=1e-2), self.particles).value
         return {'score': score, 'velocity': velocity, 'loss_values': loss_values, 'batch_loss_values': batch_loss_values}
 
     def train_model(self):
@@ -129,20 +137,21 @@ class SVGDSampler(ODESampler):
     kernel_obj: eqx.Module
     kernel_width: float
 
-    def __init__(self, particles, target_score, step_size, max_steps, logger, kernel_obj, kernel_width=-1.):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, kernel_obj, kernel_width=-1.):
         """If kernel_width is not passed, it is recomputed at each step"""
-        super().__init__(particles, target_score, step_size, max_steps, logger)
+        super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.kernel_obj = kernel_obj
         self.kernel_width = kernel_width
 
-    def step(self):
+    def step(self, step_number):
         width = self.compute_kernel_width(self.particles)
-        velocity = self.velocity(width)
+        gradient = self.gradient(width)
+        velocity = self.step_sizes[step_number] * gradient
         self.particles += velocity
         return {'kernel_width': float(width), 'velocity': velocity}
     
     @eqx.filter_jit
-    def velocity(self, width):
+    def gradient(self, width):
         """Equation (8) in https://arxiv.org/pdf/1608.04471"""
         particles = self.particles
 
@@ -155,8 +164,7 @@ class SVGDSampler(ODESampler):
         kernel_gradient_term = jnp.sum(kernel_gradient, axis=0)  # ∑ⱼ ∇ⱼ log k(xⱼ, xᵢ)
         gradient = (kernel_score_term + kernel_gradient_term) / num_particles  # φ(xᵢ) = (1/n) ∑ⱼ k(xⱼ, xᵢ) ⋅ ∇ log π(xⱼ) + ∇ⱼ log k(xⱼ, xᵢ)
         
-        velocity = self.step_size * gradient
-        return velocity
+        return gradient
 
     @eqx.filter_jit
     def compute_kernel_width(self, particles):
