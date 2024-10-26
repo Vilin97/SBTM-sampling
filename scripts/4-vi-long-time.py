@@ -67,15 +67,15 @@ plt.show()
 # sample with sbtm
 sbtm_logger = sampler.Logger()
 loss = losses.implicit_score_matching_loss
-sbtm_sampler = sampler.SBTMSampler(prior_sample, target_score, step_size, max_steps, sbtm_logger, score_model, loss, optimizer)
+sbtm_sampler = sampler.SBTMSampler(prior_sample, target_score, 0.1, 100, sbtm_logger, score_model, loss, optimizer)
 sbtm_sample = sbtm_sampler.sample()
+#%%
 fig, ax = plots.plot_distributions(prior_sample, sbtm_sample, target_density_obj)
 ax.set_title('SBTM')
 ax.set_xlim(-10, 10)
 fig.show()
-
-plots.visualize_trajectories(sbtm_logger.get_trajectory('particles'), 'SBTM', max_time=max_steps*step_size)
-plots.plot_kl_divergence(sbtm_logger.get_trajectory('particles'), target_density_obj.density, max_time=max_steps*step_size)
+plots.visualize_trajectories(sbtm_logger.get_trajectory('particles'))
+plots.plot_kl_divergence(sbtm_logger.get_trajectory('particles'), target_density_obj.density)
 plots.plot_fisher_divergence(sbtm_logger.get_trajectory('particles'), sbtm_logger.get_trajectory('score'), target_score)
 loss_values = [loss_value for log in sbtm_logger.logs for loss_value in log['loss_values']]
 batch_loss_values = [loss_value for log in sbtm_logger.logs for loss_value in log['batch_loss_values']]

@@ -95,10 +95,9 @@ class SBTMSampler(ODESampler):
         score = self.score_model(self.particles)
         velocity = self.step_sizes[step_number] * (self.target_score(self.particles) - score)
         self.particles += velocity
-        # Below is the Backward Euler step but it only works for steps size <~ 0.9
+        # Below is the Backward Euler step but it only works for steps size <~ 0.9. It is also painfully slow.
         # def fn(x, args):
         #     return self.particles + self.step_sizes[step_number] * (self.target_score(x) + self.score_model(x))
-
         # self.particles = optx.fixed_point(fn, optx.FixedPointIteration(rtol=1e-4, atol=1e-2), self.particles).value
         return {'score': score, 'velocity': velocity, 'loss_values': loss_values, 'batch_loss_values': batch_loss_values}
 
