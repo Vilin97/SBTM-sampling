@@ -5,8 +5,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import gaussian_kde
 from tqdm import tqdm
+from sbtm import stats
 
 def plot_distributions(initial_particles, transported_particles, density_obj):
+    """Plot the initial and transported particles, and the target density function"""
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # Plot histogram of initial particles
@@ -30,61 +32,7 @@ def plot_distributions(initial_particles, transported_particles, density_obj):
 
     return fig, ax
 
-def plot_losses(loss_values, batch_loss_values):
-    """Plot training loss of the score model in SBTM"""
-    def exponential_moving_average(data, smoothing):
-        ema = []
-        ema_current = data[0]
-        for value in data:
-            ema_current = (1 - smoothing) * value + smoothing * ema_current
-            ema.append(ema_current)
-        return ema
-
-    ema_batch_losses = exponential_moving_average(batch_loss_values, smoothing=0.95)
-
-    plt.figure(figsize=(12, 6))
-
-    plt.subplot(1, 2, 1)
-    plt.plot(loss_values, label='Losses')
-    plt.xlabel('Iteration')
-    plt.ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i})||^2 + 2 \nabla \cdot s(x_{i})$')
-    plt.title(r'Implicit loss through iterations')
-    plt.legend()
-
-    plt.subplot(1, 2, 2)
-    plt.plot(batch_loss_values, label='Batch Losses')
-    plt.plot(ema_batch_losses, label='Exponential Moving Average', color='red')
-    plt.xlabel('Iteration')
-    plt.ylabel(r'Batch Loss')
-    plt.title(r'Batch loss through iterations')
-    plt.legend()
-
-    plt.tight_layout()
-    plt.show()
-    
-    
-def plot_fisher_divergence(particles, scores, target_score):
-    """"Plot the Fisher divergence over time
-            1/n ∑ᵢ |s(xᵢ) - ∇log π(xᵢ)|² """
-    @jax.jit
-    def fisher_divergence(score_values_1, score_values_2):
-        """ |∇log f₁(x) - ∇log f₂(x)|² """
-        return jnp.sum(jnp.square(score_values_1 - score_values_2))
-    
-    fisher_divs = []
-    for (particles_i, scores_i) in tqdm(list(zip(particles, scores)), desc="Computing Fisher divergence"):
-        value = jnp.mean(jax.vmap(fisher_divergence)(scores_i, target_score(particles_i)))
-        fisher_divs.append(value)
-        
-    plt.figure(figsize=(6, 6))
-    plt.plot(fisher_divs)
-    plt.title('Fisher Divergence Estimate')
-    plt.xlabel('Step')
-    plt.ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i}) - \nabla \log \pi(x_{i})||^2$')
-    plt.show()
-
-
-def visualize_trajectories(particles, title, particle_idxs = [0,1,2,3,4]):
+def visualize_trajectories(particles, particle_idxs = [0,1,2,3,4], max_time=None, title=None):
     """Make a heatmap of particles over time and overlay trajectories of a few particles"""
     def kde(x_values, particles):
         density_values = []
@@ -95,21 +43,28 @@ def visualize_trajectories(particles, title, particle_idxs = [0,1,2,3,4]):
 
     def plot_density_evolution(x_values, density_values, title, trajectories):
         assert len(x_values) == len(density_values[0])
-        assert len(density_values) == len(trajectories[0])
         xmin, xmax = x_values[0], x_values[-1]
         num_x_values = len(x_values)
         num_iterations = len(density_values)
         
-        plt.figure(figsize=(6, 6))
-        sns.heatmap(jnp.array(density_values)[::-1,:])
-        plt.xticks(ticks=jnp.linspace(0, num_x_values, 9), labels=[f'{int(x)}' for x in jnp.linspace(xmin, xmax, 9)], rotation=0)
-        plt.yticks(ticks=jnp.linspace(0, num_iterations, 9), labels=[f'{int(x)}' for x in jnp.linspace(num_iterations, 0, 9)], rotation=0)
-        plt.ylabel('Iteration')
+        plt.figure(figsize=(12, 6))
+        sns.heatmap(jnp.array(density_values).T)
+        plt.yticks(ticks=jnp.linspace(0, num_x_values, 9), labels=[f'{int(x)}' for x in jnp.linspace(xmin, xmax, 9)], rotation=0)
+        if max_time is not None:
+            plt.xticks(ticks=jnp.linspace(0, num_iterations, 9), 
+                   labels=jnp.linspace(0, num_iterations, 9) * max_time / num_iterations, 
+                   rotation=0)
+            plt.xlabel('Time')
+        else:
+            plt.xticks(ticks=jnp.linspace(0, num_iterations, 9), 
+                   labels=[f'{int(x)}' for x in jnp.linspace(0, num_iterations, 9)], 
+                   rotation=0)
+            plt.xlabel('Iteration')
         plt.title(title)
         
         for trajectory in trajectories:
-            trajectory_mapped = [jnp.argmin(jnp.abs(x_values - value)) for value in trajectory[::-1]]
-            plt.plot(trajectory_mapped, jnp.linspace(0, len(density_values), len(trajectory)), color='white', marker='o', markersize=2)
+            trajectory_mapped = [jnp.argmin(jnp.abs(x_values - value)) for value in trajectory]
+            plt.plot(jnp.linspace(0, len(density_values), len(trajectory)), trajectory_mapped, color='white', marker='o', markersize=2)
         plt.show()
     
     x_values = jnp.linspace(-10, 10, 200)
@@ -117,26 +72,60 @@ def visualize_trajectories(particles, title, particle_idxs = [0,1,2,3,4]):
     trajectories = [[particles_i[j,0] for particles_i in particles] for j in particle_idxs]
     plot_density_evolution(x_values, sde_kde, title, trajectories)
     
+def plot_quantity_over_time(ax, quantity, label, yscale='linear', plot_zero_line=True, max_time=None):
+    """Plot an arbitrary quantity over time"""
+    ax.plot(quantity, label=label)
+    if yscale == 'linear' and plot_zero_line:
+        ax.axhline(y=0, color='grey', linestyle='--', linewidth=0.5)
+    ax.set_yscale(yscale)
+    ax.legend()
+    if max_time is not None:
+        ax.set_xticks(np.linspace(0, len(quantity) - 1, 9))
+        ax.set_xticklabels(np.linspace(0, max_time, 9).astype(int))
+        ax.set_xlabel('Time')
+    else:
+        ax.set_xlabel('Step')
+    return ax
+
+def plot_kl_divergence(particles, target_density, **kwargs):
+    """Compute and plot the KL divergence between the particles and the target density"""
+    kl_divergences = stats.compute_kl_divergences(particles, target_density)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    plot_quantity_over_time(ax, kl_divergences, label='KL Divergence', **kwargs)
+    ax.set_ylabel(r'$\frac{1}{n} \sum_{i} \log\left(\frac{f(x_{i})}{π(x_{i})}\right)$')
+    plt.title('KL Divergence over Time')
+    plt.show()
+
+### SBTM ###
+def plot_losses(loss_values, batch_loss_values, **kwargs):
+    """Plot training loss of the score model in SBTM"""
     
-def plot_kl_divergence(particles, target_density):
-    """Plot the KL divergence between the particles and the target density, every k steps"""
-    def kl_divergence(sample_f, g):
-        """ ∫ log(f/g) df ≈ 1/n ∑ᵢ log(f(xᵢ) / g(xᵢ)) where f is estimated with KDE """
-        f_kde = gaussian_kde(sample_f.T)
-        return jnp.clip(jnp.mean(jnp.log(f_kde(sample_f.T) / g(sample_f))), a_min=0, a_max=None)
+    ema_batch_losses = stats.exponential_moving_average(batch_loss_values, smoothing=0.95)
 
-    kl_divergences = []
-    for i, particles_i in enumerate(tqdm(particles, desc="Computing KL divergence")):
-        kl_div = kl_divergence(particles_i, target_density)
-        if kl_div == jnp.inf:
-            kl_div = kl_divergences[-1]
-        kl_divergences.append(kl_div)
+    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
 
-    plt.figure(figsize=(6, 6))
-    plt.plot(kl_divergences)
-    plt.axhline(y=0, color='grey', linestyle='--', linewidth=0.5, label='KL = 0')
-    plt.legend()
-    plt.title('KL Divergence Over Time')
-    plt.xlabel('Step')
-    plt.ylabel(r'$\frac{1}{n} \sum_{i} \log\left(\frac{f(x_{i})}{g(x_{i})}\right)$')
+    plot_quantity_over_time(axs[0], loss_values, label='Losses', **kwargs)
+    axs[0].set_xlabel('Iteration')
+    axs[0].set_ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i})||^2 + 2 \nabla \cdot s(x_{i})$')
+    axs[0].set_title(r'Implicit loss through iterations')
+
+    plot_quantity_over_time(axs[1], batch_loss_values, label='Batch Losses', **kwargs)
+    plot_quantity_over_time(axs[1], ema_batch_losses, label='Exponential Moving Average', **kwargs)
+    axs[1].set_xlabel('Iteration')
+    axs[1].set_ylabel(r'Batch Loss')
+    axs[1].set_title(r'Batch loss through iterations')
+
+    plt.tight_layout()
+    plt.show()
+    
+    
+def plot_fisher_divergence(particles, scores, target_score, **kwargs):
+    """"Plot the Fisher divergence over time
+            1/n ∑ᵢ |s(xᵢ) - ∇log π(xᵢ)|² """
+    fisher_divs = stats.compute_fisher_divergences(particles, scores, target_score)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    plot_quantity_over_time(ax, fisher_divs, label='Fisher Divergence', **kwargs)
+    ax.set_ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i}) - \nabla \log \pi(x_{i})||^2$')
+    plt.title('Fisher Divergence Estimate')
     plt.show()
