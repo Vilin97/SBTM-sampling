@@ -76,7 +76,7 @@ for score_model in [score_model_1, score_model_2]:
             explicit_loss_value = losses.explicit_score_matching_loss(score_model, prior_sample, prior_score(prior_sample))
             print(f"Iteration {i}: Explicit Loss = {explicit_loss_value:.5f}")
         
-        loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_score, prior_sample)
+        loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_sample, prior_score(prior_sample))
         optimizer.update(grads)
 
     x = jnp.linspace(-5, 5, 1000).reshape(-1, 1)
