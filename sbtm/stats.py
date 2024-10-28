@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from scipy.stats import gaussian_kde
+from jax.scipy.stats import gaussian_kde
 from tqdm import tqdm
 
 def kl_divergence(sample_f, g):
@@ -21,8 +21,26 @@ def compute_kl_divergences(particles, target_density):
 
     return kl_divergences
 
+def compute_score(sample_f):
+    """Use kde to estimate the score at each particle location"""
+    f_kde = gaussian_kde(sample_f.T)
+    log_density = lambda x: jnp.log(f_kde(x))[0]
+    score_fun = jax.grad(log_density)
+    return jax.vmap(score_fun)(sample_f)
 
 def compute_fisher_divergences(particles, scores, target_score):
+    """
+    Compute the Fisher divergences for a set of particles and their corresponding scores.
+    
+    Parameters:
+    particles (list or array-like): A collection of particle arrays.
+    scores (list or array-like): A collection of score arrays at particle locations.
+    target_score (callable): A function that computes the target score for a given set of particles.
+    
+    Returns:
+    list: A list of Fisher divergence values for each set of particles and scores.
+    """
+    
     fisher_divs = []
     for particles_i, scores_i in tqdm(list(zip(particles, scores)), desc="Computing Fisher divergence"):
         value = jnp.mean(jax.vmap(square_norm_diff)(scores_i, target_score(particles_i)))

@@ -76,7 +76,7 @@ ax.set_xlim(-10, 10)
 fig.show()
 plots.visualize_trajectories(sbtm_logger.get_trajectory('particles'))
 plots.plot_kl_divergence(sbtm_logger.get_trajectory('particles'), target_density_obj.density)
-plots.plot_fisher_divergence(sbtm_logger.get_trajectory('particles'), sbtm_logger.get_trajectory('score'), target_score)
+plots.plot_fisher_divergence(sbtm_logger.get_trajectory('particles'), target_score, sbtm_logger.get_trajectory('score'))
 loss_values = [loss_value for log in sbtm_logger.logs for loss_value in log['loss_values']]
 batch_loss_values = [loss_value for log in sbtm_logger.logs for loss_value in log['batch_loss_values']]
 plots.plot_losses(loss_values, batch_loss_values)

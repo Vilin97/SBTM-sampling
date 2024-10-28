@@ -17,8 +17,8 @@ for module in [density, plots, kernel, losses, models, sampler]:
 #%%
 # set up
 step_size = 0.2
-max_steps = 200
-num_particles = 1000
+max_steps = 100
+num_particles = 10000
 key = jrandom.key(42)
 
 prior_params = {'mean': jnp.array([0]), 'covariance': jnp.array([[10.]])}
@@ -34,13 +34,15 @@ target_score = target_density_obj.score
 sde_logger = sampler.Logger()
 sde_sampler = sampler.SDESampler(prior_sample, target_score, step_size, max_steps, sde_logger)
 sde_sample = sde_sampler.sample()
+#%%
 fig, ax = plots.plot_distributions(prior_sample, sde_sample, target_density_obj)
 ax.set_xlim(-10, 10)
 ax.set_title('SDE')
 fig.show()    
-
-plots.visualize_trajectories(sde_logger.get_trajectory('particles'), 'SDE')
+plots.visualize_trajectories(sde_logger.get_trajectory('particles'))
 plots.plot_kl_divergence(sde_logger.get_trajectory('particles'), target_density_obj.density)
+# TODO: this does not look right
+plots.plot_fisher_divergence(sde_logger.get_trajectory('particles'), target_density_obj.density)
 
 #%%
 # sample with svgd
@@ -52,7 +54,7 @@ fig, ax = plots.plot_distributions(prior_sample, svgd_sample, target_density_obj
 ax.set_xlim(-10, 10)
 fig.show()
 
-plots.visualize_trajectories(svgd_logger.get_trajectory('particles'), 'SVGD')
+plots.visualize_trajectories(svgd_logger.get_trajectory('particles'))
 plots.plot_kl_divergence(svgd_logger.get_trajectory('particles'), target_density_obj.density)
 
 #%%
@@ -77,9 +79,9 @@ ax.set_title('SBTM')
 ax.set_xlim(-10, 10)
 fig.show()
 
-plots.visualize_trajectories(sbtm_logger.get_trajectory('particles'), 'SBTM')
+plots.visualize_trajectories(sbtm_logger.get_trajectory('particles'))
 plots.plot_kl_divergence(sbtm_logger.get_trajectory('particles'), target_density_obj.density)
-plots.plot_fisher_divergence(sbtm_logger.get_trajectory('particles'), sbtm_logger.get_trajectory('score'), target_score)
+plots.plot_fisher_divergence(sbtm_logger.get_trajectory('particles'), target_score, sbtm_logger.get_trajectory('score'))
 
 #%%
 # Annealing: sample from noised target, use the sample as initial condition for less noised target, etc
@@ -113,7 +115,7 @@ for (i, target) in enumerate(targets):
     prior_sample_i = sample
     
 # plot trajectories
-plots.visualize_trajectories(logger.get_trajectory('particles')[::20], 'SBTM', particle_idxs=range(1))
+plots.visualize_trajectories(logger.get_trajectory('particles')[::20], particle_idxs=range(1))
 
 # plot kl divergence
 plots.plot_kl_divergence(logger.get_trajectory('particles')[::10], target_density_obj.density)
@@ -124,6 +126,6 @@ batch_loss_values = [loss_value for log in logger.logs for loss_value in log['ba
 plots.plot_losses(loss_values, batch_loss_values)
 
 # plot fisher divergence
-plots.plot_fisher_divergence(logger.get_trajectory('particles')[::10], logger.get_trajectory('score')[::10], target_score)
+plots.plot_fisher_divergence(logger.get_trajectory('particles')[::10], target_score, logger.get_trajectory('score')[::10])
 
 # %%

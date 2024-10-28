@@ -3,25 +3,29 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import gaussian_kde
+from jax.scipy.stats import gaussian_kde
 from tqdm import tqdm
 from sbtm import stats
 
 def plot_distributions(initial_particles, transported_particles, density_obj):
     """Plot the initial and transported particles, and the target density function"""
     fig, ax = plt.subplots(figsize=(10, 6))
+    x = np.linspace(min(initial_particles + transported_particles) - 1, 
+                    max(initial_particles + transported_particles) + 1, 1000)
 
-    # Plot histogram of initial particles
+    # Plot initial particles
     ax.hist(initial_particles, bins=30, density=True, alpha=0.4, color='b',
             histtype='bar', label='Initial Particles')
+    kde_initial = gaussian_kde(initial_particles.T)(jnp.reshape(x, (1, -1)))
+    ax.plot(x, kde_initial, 'b-', lw=2, label='Initial KDE')
 
     # Plot histogram of transported particles
     ax.hist(transported_particles, bins=30, density=True, alpha=0.4,
             color='g', histtype='bar', label='Transported Particles')
+    kde_transported = gaussian_kde(transported_particles.T)(jnp.reshape(x, (1, -1)))
+    ax.plot(x, kde_transported, 'g-', lw=2, label='Transported KDE')
 
     # Plot the target density function
-    x = np.linspace(min(initial_particles + transported_particles) - 1, 
-                    max(initial_particles + transported_particles) + 1, 1000)
     y = jax.vmap(density_obj.density)(x)
     ax.plot(x, y, 'r-', lw=2, label='Target Distribution')
 
@@ -96,6 +100,19 @@ def plot_kl_divergence(particles, target_density, **kwargs):
     plt.title('KL Divergence over Time')
     plt.show()
 
+def plot_fisher_divergence(particles, target_score, scores=None, **kwargs):
+    """"Plot the Fisher divergence over time
+            1/n ∑ᵢ |∇log f(xᵢ) - ∇log π(xᵢ)|² """
+    if scores is None:
+        scores = [stats.compute_score(sample_f) for sample_f in particles]
+    fisher_divs = stats.compute_fisher_divergences(particles, scores, target_score)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    plot_quantity_over_time(ax, fisher_divs, label='Fisher Divergence', **kwargs)
+    ax.set_ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i}) - \nabla \log \pi(x_{i})||^2$')
+    plt.title('Fisher Divergence Estimate')
+    plt.show()
+
 ### SBTM ###
 def plot_losses(loss_values, batch_loss_values, **kwargs):
     """Plot training loss of the score model in SBTM"""
@@ -119,13 +136,3 @@ def plot_losses(loss_values, batch_loss_values, **kwargs):
     plt.show()
     
     
-def plot_fisher_divergence(particles, scores, target_score, **kwargs):
-    """"Plot the Fisher divergence over time
-            1/n ∑ᵢ |s(xᵢ) - ∇log π(xᵢ)|² """
-    fisher_divs = stats.compute_fisher_divergences(particles, scores, target_score)
-
-    fig, ax = plt.subplots(figsize=(6, 6))
-    plot_quantity_over_time(ax, fisher_divs, label='Fisher Divergence', **kwargs)
-    ax.set_ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i}) - \nabla \log \pi(x_{i})||^2$')
-    plt.title('Fisher Divergence Estimate')
-    plt.show()
