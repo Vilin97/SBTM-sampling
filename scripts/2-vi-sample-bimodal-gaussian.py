@@ -2,7 +2,7 @@
 import importlib
 import jax.numpy as jnp
 import jax.random as jrandom
-from sbtm import density, plots, kernel, losses, models, sampler
+from sbtm import density, plots, kernel, losses, models, sampler, stats
 from flax import nnx
 import optax
 import os
@@ -16,9 +16,9 @@ for module in [density, plots, kernel, losses, models, sampler]:
 
 #%%
 # set up
-step_size = 0.2
+step_size = 0.05
 max_steps = 100
-num_particles = 10000
+num_particles = 1000
 key = jrandom.key(42)
 
 prior_params = {'mean': jnp.array([0]), 'covariance': jnp.array([[10.]])}
@@ -41,8 +41,7 @@ ax.set_title('SDE')
 fig.show()    
 plots.visualize_trajectories(sde_logger.get_trajectory('particles'))
 plots.plot_kl_divergence(sde_logger.get_trajectory('particles'), target_density_obj.density)
-# TODO: this does not look right
-plots.plot_fisher_divergence(sde_logger.get_trajectory('particles'), target_density_obj.density)
+plots.plot_fisher_divergence(sde_logger.get_trajectory('particles'), target_score)
 
 #%%
 # sample with svgd
@@ -72,7 +71,7 @@ print(losses.explicit_score_matching_loss(score_model, prior_sample, prior_score
 # sample with sbtm
 sbtm_logger = sampler.Logger()
 loss = losses.implicit_score_matching_loss
-sbtm_sampler = sampler.SBTMSampler(prior_sample, target_score, step_size, 50, sbtm_logger, score_model, loss, optimizer)
+sbtm_sampler = sampler.SBTMSampler(prior_sample, target_score, step_size, max_steps, sbtm_logger, score_model, loss, optimizer)
 sbtm_sample = sbtm_sampler.sample()
 fig, ax = plots.plot_distributions(prior_sample, sbtm_sample, target_density_obj)
 ax.set_title('SBTM')
@@ -82,6 +81,49 @@ fig.show()
 plots.visualize_trajectories(sbtm_logger.get_trajectory('particles'))
 plots.plot_kl_divergence(sbtm_logger.get_trajectory('particles'), target_density_obj.density)
 plots.plot_fisher_divergence(sbtm_logger.get_trajectory('particles'), target_score, sbtm_logger.get_trajectory('score'))
+#%%
+# plot the fisher divergence and time derivative of KL divergence
+steps_to_plot = 100
+fig, ax = plt.subplots(figsize=(6, 6))
+particles = sbtm_logger.get_trajectory('particles')
+
+kde_kl_divs = stats.compute_kl_divergences(particles, target_density_obj.density)
+kde_kl_divs = jnp.array(kde_kl_divs)
+kl_div_time_derivative = -jnp.diff(kde_kl_divs) / step_size
+kl_div_time_derivative = jnp.clip(kl_div_time_derivative, a_min=1e-5)
+plots.plot_quantity_over_time(ax, kl_div_time_derivative[:steps_to_plot], label=r'$-\frac{d}{dt} KL(f_t||\pi)$', marker='o', markersize=3)
+
+sbtm_scores = sbtm_logger.get_trajectory('score')
+sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(particles, sbtm_scores, target_score))
+plots.plot_quantity_over_time(ax, sbtm_fisher_divs[:steps_to_plot], label='NN estimate')
+
+kde_scores = [stats.compute_score(sample_f) for sample_f in particles]
+kde_fisher_divs = jnp.array(stats.compute_fisher_divergences(particles, kde_scores, target_score))
+plots.plot_quantity_over_time(ax, kde_fisher_divs[:steps_to_plot], label='KDE estimate', max_time=max_steps*step_size)
+
+ax.set_yscale('log')
+y_min = min(jnp.min(kl_div_time_derivative), jnp.min(sbtm_fisher_divs), jnp.min(kde_fisher_divs))
+y_max = max(jnp.max(kl_div_time_derivative), jnp.max(sbtm_fisher_divs), jnp.max(kde_fisher_divs))
+ax.set_ylim(y_min, y_max)
+ax.set_title("Fisher Divergence Estimates")
+fig.show()
+
+#%%
+# plot the KL divergence estimates
+from scipy import integrate
+steps_to_plot = 100
+fig, ax = plt.subplots(figsize=(6, 6))
+integral_of_fisher_divs_1 = integrate.cumulative_trapezoid(sbtm_fisher_divs, dx=step_size, initial=0.)
+integral_of_fisher_divs_2 = jnp.cumulative_sum(jnp.array(sbtm_fisher_divs), include_initial=True) * step_size
+sbtm_kl_divs_1 = kde_kl_divs[0] - integral_of_fisher_divs_1
+sbtm_kl_divs_2 = kde_kl_divs[0] - integral_of_fisher_divs_2
+plots.plot_quantity_over_time(ax, kde_kl_divs[:steps_to_plot], label='KDE estimate of KL', marker='o', markersize=3)
+plots.plot_quantity_over_time(ax, sbtm_kl_divs_1[:steps_to_plot], label='NN estimate, trapezoid rule')
+plots.plot_quantity_over_time(ax, sbtm_kl_divs_2[:steps_to_plot], label='NN estimate, left Riemann sum', max_time=max_steps*step_size)
+
+ax.set_title("KL Divergence Estimates")
+fig.show()
+
 
 #%%
 # Annealing: sample from noised target, use the sample as initial condition for less noised target, etc

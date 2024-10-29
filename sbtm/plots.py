@@ -76,9 +76,9 @@ def visualize_trajectories(particles, particle_idxs = [0,1,2,3,4], max_time=None
     trajectories = [[particles_i[j,0] for particles_i in particles] for j in particle_idxs]
     plot_density_evolution(x_values, sde_kde, title, trajectories)
     
-def plot_quantity_over_time(ax, quantity, label, yscale='linear', plot_zero_line=True, max_time=None):
+def plot_quantity_over_time(ax, quantity, label, yscale='linear', plot_zero_line=True, max_time=None, **kwargs):
     """Plot an arbitrary quantity over time"""
-    ax.plot(quantity, label=label)
+    ax.plot(quantity, label=label, **kwargs)
     if yscale == 'linear' and plot_zero_line:
         ax.axhline(y=0, color='grey', linestyle='--', linewidth=0.5)
     ax.set_yscale(yscale)
@@ -109,7 +109,7 @@ def plot_fisher_divergence(particles, target_score, scores=None, **kwargs):
 
     fig, ax = plt.subplots(figsize=(6, 6))
     plot_quantity_over_time(ax, fisher_divs, label='Fisher Divergence', **kwargs)
-    ax.set_ylabel(r'$\frac{1}{n} \sum_{i} ||s(x_{i}) - \nabla \log \pi(x_{i})||^2$')
+    ax.set_ylabel(r'$\frac{1}{n} \sum_{i} ||\nabla \log f_t(x_{i}) - \nabla \log \pi(x_{i})||^2$')
     plt.title('Fisher Divergence Estimate')
     plt.show()
 
