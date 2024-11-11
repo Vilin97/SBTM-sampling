@@ -5,7 +5,6 @@ import equinox as eqx
 from tqdm import tqdm
 import optax
 from flax import nnx
-import optimistix as optx
 
 
 class Logger:
@@ -38,7 +37,7 @@ class Sampler:
     def sample(self):
         """Sample from the target distribution"""
         for step_number in tqdm(range(self.max_steps), desc="Sampling"):
-            to_log = {'particles': self.particles, 'step_number': step_number}
+            to_log = {'particles': self.particles, 'step_number': step_number, 'step_size': self.step_sizes[step_number]}
             step_log = self.step(step_number)
             to_log.update(step_log)
             self.logger.log(to_log)
@@ -74,6 +73,57 @@ class ODESampler(Sampler):
     """Deterministic sampler"""
 
 
+class GDStoppingCriterion:
+    """Gradient descent stopping criterion"""
+    
+    def update(self, logger, currrent_loss_value):
+        """Update the stopping criterion based on the logger"""
+        pass
+
+    def __call__(self, loss_values):
+        """
+        loss_values: list of loss values during optimization
+        
+        Returns: bool, whether to stop optimization
+        """
+        raise NotImplementedError("must be implemented by subclasses")
+    
+class FixedNumEpochs(GDStoppingCriterion):
+    """Stop after a fixed number of epochs"""
+
+    def __init__(self, num_epochs):
+        self.num_epochs = num_epochs
+
+    def __call__(self, loss_values):
+        return len(loss_values) >= self.num_epochs
+    
+class AdaptiveNumEpochs(GDStoppingCriterion):
+    """Stop after k*n epochs, where n = (log(previous_loss) - log(current_loss))/step_size"""
+    
+    def __init__(self, k, initial_num_epochs=100):
+        self.k = k
+        self.num_epochs = initial_num_epochs
+    
+    def __call__(self, loss_values):
+        return len(loss_values) >= self.num_epochs
+    
+    def update(self, logger, currrent_loss_value):
+        if len(logger.logs) > 0:
+            previous_loss = logger.logs[-1]['loss_values'][-1]
+            step_size = logger.logs[-1]['step_size']
+            self.num_epochs = self.k*(jnp.log(previous_loss) - jnp.log(currrent_loss_value)) / step_size
+    
+class AbsoluteLossChange(GDStoppingCriterion):
+    """Stop when the absolute change in loss is below a threshold"""
+
+    def __init__(self, threshold):
+        self.threshold = threshold
+
+    def __call__(self, loss_values):
+        if len(loss_values) < 2:
+            return False
+        return abs(loss_values[-2] - loss_values[-1]) < self.threshold
+
 class SBTMSampler(ODESampler):
     """Use a NN to approximate the score"""
 
@@ -81,8 +131,9 @@ class SBTMSampler(ODESampler):
     loss: callable  # loss function to minimize at each step
     optimizer: optax.GradientTransformation  # optimizer for training the model
     mini_batch_size: int  # size of mini-batches
+    gd_stopping_criterion: GDStoppingCriterion  # stopping criterion for gradient descent
 
-    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, mini_batch_size=200):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, mini_batch_size=100):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
@@ -91,14 +142,11 @@ class SBTMSampler(ODESampler):
 
     def step(self, step_number):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
+        self.gd_stopping_criterion.update(self.logger, self.loss(self.score_model, self.particles))
         loss_values, batch_loss_values = self.train_model()
         score = self.score_model(self.particles)
         velocity = self.step_sizes[step_number] * (self.target_score(self.particles) - score)
         self.particles += velocity
-        # Below is the Backward Euler step but it only works for steps size <~ 0.9. It is also painfully slow.
-        # def fn(x, args):
-        #     return self.particles + self.step_sizes[step_number] * (self.target_score(x) + self.score_model(x))
-        # self.particles = optx.fixed_point(fn, optx.FixedPointIteration(rtol=1e-4, atol=1e-2), self.particles).value
         return {'score': score, 'velocity': velocity, 'loss_values': loss_values, 'batch_loss_values': batch_loss_values}
 
     def train_model(self):
@@ -108,9 +156,8 @@ class SBTMSampler(ODESampler):
         num_particles = self.particles.shape[0]
         num_batches = num_particles // self.mini_batch_size
 
-        # TODO: do not hardcode number of steps
         counter = 0
-        while counter < 20:
+        while not self.gd_stopping_criterion(loss_values):
             loss_values.append(self.loss(self.score_model, self.particles))
             for i in range(num_batches):
                 counter += 1
@@ -120,6 +167,7 @@ class SBTMSampler(ODESampler):
                 loss_value = opt_step(self.score_model, self.optimizer, self.loss, batch)
                 batch_loss_values.append(loss_value)
         
+        loss_values.append(self.loss(self.score_model, self.particles))
         return loss_values, batch_loss_values
 
 @nnx.jit(static_argnames='loss')
