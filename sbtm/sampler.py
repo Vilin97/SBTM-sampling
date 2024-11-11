@@ -9,15 +9,18 @@ from flax import nnx
 
 class Logger:
     """Logger class to log target score, step_sizes, max-steps, step number, particle locations, predicted score, score model. Should have method `log`."""
-    # TODO: add hyperaparameters to the logger, logged at the beginning of the simulation
     def __init__(self):
         self.logs = []
+        self.hyperparameters = {}
 
     def log(self, to_log):
         self.logs.append(to_log)
         
     def get_trajectory(self, key):
         return [log[key] for log in self.logs]
+    
+    def log_hyperparameters(self, hyperparameters):
+        self.hyperparameters.update(hyperparameters)
 
 
 class Sampler:
@@ -33,6 +36,7 @@ class Sampler:
         self.step_sizes = [step_sizes] * max_steps if isinstance(step_sizes, (int, float)) else step_sizes
         self.max_steps = max_steps
         self.logger = logger
+        self.logger.log_hyperparameters({'step_sizes': self.step_sizes, 'max_steps': self.max_steps})
 
     def sample(self):
         """Sample from the target distribution"""
@@ -57,6 +61,7 @@ class SDESampler(Sampler):
     def __init__(self, particles, target_score, step_sizes, max_steps, logger, seed=0):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.key = jrandom.key(seed)
+        self.logger.log_hyperparameters({'seed': seed})
 
     def step(self, step_number):
         """Equation (4) in https://arxiv.org/pdf/1907.05600"""
@@ -133,12 +138,14 @@ class SBTMSampler(ODESampler):
     mini_batch_size: int  # size of mini-batches
     gd_stopping_criterion: GDStoppingCriterion  # stopping criterion for gradient descent
 
-    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, mini_batch_size=100):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumEpochs(20), mini_batch_size=100):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
         self.optimizer = optimizer
+        self.gd_stopping_criterion = gd_stopping_criterion
         self.mini_batch_size = mini_batch_size
+        self.logger.log_hyperparameters({'mini_batch_size': mini_batch_size, 'optimizer': optimizer, 'gd_stopping_criterion': gd_stopping_criterion})
 
     def step(self, step_number):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
@@ -156,11 +163,9 @@ class SBTMSampler(ODESampler):
         num_particles = self.particles.shape[0]
         num_batches = num_particles // self.mini_batch_size
 
-        counter = 0
         while not self.gd_stopping_criterion(loss_values):
             loss_values.append(self.loss(self.score_model, self.particles))
             for i in range(num_batches):
-                counter += 1
                 batch_start = i * self.mini_batch_size
                 batch_end = batch_start + self.mini_batch_size
                 batch = self.particles[batch_start:batch_end, :]
@@ -189,6 +194,7 @@ class SVGDSampler(ODESampler):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.kernel_obj = kernel_obj
         self.kernel_width = kernel_width
+        self.logger.log_hyperparameters({'kernel_obj': kernel_obj, 'kernel_width': kernel_width})
 
     def step(self, step_number):
         width = self.compute_kernel_width(self.particles)
