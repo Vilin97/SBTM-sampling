@@ -81,50 +81,55 @@ class ODESampler(Sampler):
 class GDStoppingCriterion:
     """Gradient descent stopping criterion"""
     
-    def update(self, logger, currrent_loss_value):
-        """Update the stopping criterion based on the logger"""
+    def fit_pretrain(self, score_model, particles):
+        pass
+    
+    def fit_posttrain(self, score_model, particles):
         pass
 
-    def __call__(self, loss_values):
-        """
-        loss_values: list of loss values during optimization
-        
-        Returns: bool, whether to stop optimization
-        """
+    def __call__(self, loss_values, batch_loss_values):
         raise NotImplementedError("must be implemented by subclasses")
     
-class FixedNumEpochs(GDStoppingCriterion):
-    """Stop after a fixed number of epochs"""
+class FixedNumBatches(GDStoppingCriterion):
+    def __init__(self, num_batches=20):
+        self.num_batches = num_batches
 
-    def __init__(self, num_epochs):
-        self.num_epochs = num_epochs
-
-    def __call__(self, loss_values):
-        return len(loss_values) >= self.num_epochs
+    def __call__(self, loss_values, batch_loss_values):
+        return len(batch_loss_values) >= self.num_batches
     
-class AdaptiveNumEpochs(GDStoppingCriterion):
-    """Stop after k*n epochs, where n = (log(previous_loss) - log(current_loss))/step_size"""
+class AdaptiveNumBatches(GDStoppingCriterion):
+    """Stop after k*n batch steps, where n = (log(previous_loss) - log(current_loss))/step_size"""
     
-    def __init__(self, k, initial_num_epochs=100):
+    def __init__(self, step_size, loss, k=1, default_num_batches=20):
+        "k is the constant of proportionality"
+        self.step_size = step_size
+        self.loss = loss
         self.k = k
-        self.num_epochs = initial_num_epochs
+        self.previous_loss_value = jnp.nan
+        self.current_loss_value = jnp.nan
+        self.default_num_batches = default_num_batches
+        self.num_batches = default_num_batches
     
-    def __call__(self, loss_values):
-        return len(loss_values) >= self.num_epochs
+    def __call__(self, loss_values, batch_loss_values):
+        return len(batch_loss_values) >= self.num_batches
     
-    def update(self, logger, currrent_loss_value):
-        if len(logger.logs) > 0:
-            previous_loss = logger.logs[-1]['loss_values'][-1]
-            step_size = logger.logs[-1]['step_size']
-            self.num_epochs = self.k*(jnp.log(previous_loss) - jnp.log(currrent_loss_value)) / step_size
+    def fit_pretrain(self, score_model, particles):
+        self.current_loss_value = self.loss(score_model, particles)
+        self.num_batches = self.k * jnp.log(self.current_loss_value/self.previous_loss_value) / self.step_size
+        print(f"previous loss = {self.previous_loss_value :.3f}, current loss = {self.current_loss_value :.3f}, num_batches = {self.num_batches}")
+        if self.num_batches < 1 or jnp.isnan(self.num_batches):
+            self.num_batches = self.default_num_batches
+    
+    def fit_posttrain(self, score_model, particles):
+        self.previous_loss_value = self.loss(score_model, particles)
     
 class AbsoluteLossChange(GDStoppingCriterion):
     """Stop when the absolute change in loss is below a threshold"""
 
-    def __init__(self, threshold):
+    def __init__(self, threshold=0.01):
         self.threshold = threshold
 
-    def __call__(self, loss_values):
+    def __call__(self, loss_values, batch_loss_values):
         if len(loss_values) < 2:
             return False
         return abs(loss_values[-2] - loss_values[-1]) < self.threshold
@@ -137,20 +142,23 @@ class SBTMSampler(ODESampler):
     optimizer: optax.GradientTransformation  # optimizer for training the model
     mini_batch_size: int  # size of mini-batches
     gd_stopping_criterion: GDStoppingCriterion  # stopping criterion for gradient descent
+    debug: bool  # whether to print debug information
 
-    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumEpochs(20), mini_batch_size=100):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumBatches(), mini_batch_size=200, debug=False):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
         self.optimizer = optimizer
         self.gd_stopping_criterion = gd_stopping_criterion
         self.mini_batch_size = mini_batch_size
+        self.debug = debug
         self.logger.log_hyperparameters({'mini_batch_size': mini_batch_size, 'optimizer': optimizer, 'gd_stopping_criterion': gd_stopping_criterion})
 
     def step(self, step_number):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
-        self.gd_stopping_criterion.update(self.logger, self.loss(self.score_model, self.particles))
+        self.gd_stopping_criterion.fit_pretrain(self.score_model, self.particles)
         loss_values, batch_loss_values = self.train_model()
+        self.gd_stopping_criterion.fit_posttrain(self.score_model, self.particles)
         score = self.score_model(self.particles)
         velocity = self.step_sizes[step_number] * (self.target_score(self.particles) - score)
         self.particles += velocity
@@ -163,7 +171,7 @@ class SBTMSampler(ODESampler):
         num_particles = self.particles.shape[0]
         num_batches = num_particles // self.mini_batch_size
 
-        while not self.gd_stopping_criterion(loss_values):
+        while not self.gd_stopping_criterion(loss_values, batch_loss_values):
             loss_values.append(self.loss(self.score_model, self.particles))
             for i in range(num_batches):
                 batch_start = i * self.mini_batch_size

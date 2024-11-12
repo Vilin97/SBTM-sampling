@@ -48,8 +48,12 @@ def compute_fisher_divergences(particles, scores, target_score):
 
     return fisher_divs
 
+def ema(data, smoothing):
+    """Smooothing = 0 means no smoothing, smoothing = 1 means no change"""
+    return exponential_moving_average(data, smoothing)
 
 def exponential_moving_average(data, smoothing):
+    """Smooothing = 0 means no smoothing, smoothing = 1 means no change"""
     ema = []
     ema_current = data[0]
     for value in data:

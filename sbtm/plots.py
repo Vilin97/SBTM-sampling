@@ -85,7 +85,7 @@ def plot_quantity_over_time(ax, quantity, label, yscale='linear', plot_zero_line
     ax.legend()
     if max_time is not None:
         ax.set_xticks(np.linspace(0, len(quantity) - 1, 9))
-        ax.set_xticklabels(np.linspace(0, max_time, 9).astype(int))
+        ax.set_xticklabels(np.linspace(0, max_time, 9))
         ax.set_xlabel('Time')
     else:
         ax.set_xlabel('Step')

@@ -58,9 +58,20 @@ def explicit_score_matching_loss(s, particles, target_score_values):
 def implicit_score_matching_loss(s, particles):
     """
     Compute the implicit score matching loss for vector field s
-    1/n ∑ᵢ ||f(xᵢ)||^2 + 2 ∇⋅f(xᵢ)
+    1/n ∑ᵢ ||s(xᵢ)||^2 + 2 ∇⋅s(xᵢ)
     """
     div = divergence(s, 'reverse')
     def loss(x):
         return jnp.sum(jnp.square(s(x))) + 2 * div(x)
+    return jnp.mean(jax.vmap(loss)(particles))
+
+@nnx.jit
+def approx_explicit_score_matching_loss(s, particles):
+    """
+    Compute the implicit score matching loss for vector field s
+    1/n ∑ᵢ 2 ||s(xᵢ)||^2 + 2 ∇⋅s(xᵢ)
+    """
+    div = divergence(s, 'reverse')
+    def loss(x):
+        return 2 * jnp.sum(jnp.square(s(x))) + 2 * div(x)
     return jnp.mean(jax.vmap(loss)(particles))
