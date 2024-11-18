@@ -87,7 +87,7 @@ class GDStoppingCriterion:
         raise NotImplementedError("must be implemented by subclasses")
     
 class FixedNumBatches(GDStoppingCriterion):
-    def __init__(self, num_batches=20):
+    def __init__(self, num_batches=10):
         self.num_batches = num_batches
 
     def __call__(self, loss_values, batch_loss_values):
@@ -113,8 +113,9 @@ class SBTMSampler(ODESampler):
     mini_batch_size: int  # size of mini-batches
     gd_stopping_criterion: GDStoppingCriterion  # stopping criterion for gradient descent
     debug: bool  # whether to print debug information
+    heun: bool  # whether to use Heun's method
 
-    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumBatches(), mini_batch_size=200, debug=False):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumBatches(), mini_batch_size=200, debug=False, heun=True):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
@@ -122,13 +123,22 @@ class SBTMSampler(ODESampler):
         self.gd_stopping_criterion = gd_stopping_criterion
         self.mini_batch_size = mini_batch_size
         self.debug = debug
-        self.logger.log_hyperparameters({'mini_batch_size': mini_batch_size, 'optimizer': optimizer, 'gd_stopping_criterion': gd_stopping_criterion})
+        self.heun = heun
+        self.logger.log_hyperparameters({'mini_batch_size': mini_batch_size, 'optimizer': optimizer, 'gd_stopping_criterion': gd_stopping_criterion, 'heun': heun})
 
     def step(self, step_number):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
         loss_values, batch_loss_values = self.train_model()
         score = self.score_model(self.particles)
-        velocity = self.step_sizes[step_number] * (self.target_score(self.particles) - score)
+        if self.heun:
+            drift = self.target_score(self.particles) - score
+            intermediate_particles = self.particles + self.step_sizes[step_number] * drift
+            intermediate_score = self.score_model(intermediate_particles)
+            intermediate_drift = self.target_score(intermediate_particles) - intermediate_score
+            velocity = self.step_sizes[step_number] * 0.5 * (drift + intermediate_drift)
+        else:
+            drift = self.target_score(self.particles) - score
+            velocity = self.step_sizes[step_number] * drift
         self.particles += velocity
         return {'score': score, 'velocity': velocity, 'loss_values': loss_values, 'batch_loss_values': batch_loss_values}
 
