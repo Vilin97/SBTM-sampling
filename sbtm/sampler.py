@@ -83,12 +83,6 @@ class ODESampler(Sampler):
 class GDStoppingCriterion:
     """Gradient descent stopping criterion"""
     
-    def fit_pretrain(self, score_model, particles):
-        pass
-    
-    def fit_posttrain(self, score_model, particles):
-        pass
-
     def __call__(self, loss_values, batch_loss_values):
         raise NotImplementedError("must be implemented by subclasses")
     
@@ -132,9 +126,7 @@ class SBTMSampler(ODESampler):
 
     def step(self, step_number):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
-        self.gd_stopping_criterion.fit_pretrain(self.score_model, self.particles)
         loss_values, batch_loss_values = self.train_model()
-        self.gd_stopping_criterion.fit_posttrain(self.score_model, self.particles)
         score = self.score_model(self.particles)
         velocity = self.step_sizes[step_number] * (self.target_score(self.particles) - score)
         self.particles += velocity
