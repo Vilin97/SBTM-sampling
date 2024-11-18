@@ -40,8 +40,10 @@ class Sampler:
 
     def sample(self):
         """Sample from the target distribution"""
-        for step_number in tqdm(range(self.max_steps), desc="Sampling"):
-            to_log = {'particles': self.particles, 'step_number': step_number, 'step_size': self.step_sizes[step_number]}
+        for step_number, step_size in enumerate(tqdm(self.step_sizes, desc="Sampling")):
+            if step_number == self.max_steps:
+                break
+            to_log = {'particles': self.particles, 'step_number': step_number, 'step_size': step_size}
             step_log = self.step(step_number)
             to_log.update(step_log)
             self.logger.log(to_log)
@@ -96,33 +98,7 @@ class FixedNumBatches(GDStoppingCriterion):
 
     def __call__(self, loss_values, batch_loss_values):
         return len(batch_loss_values) >= self.num_batches
-    
-class AdaptiveNumBatches(GDStoppingCriterion):
-    """Stop after k*n batch steps, where n = (log(previous_loss) - log(current_loss))/step_size"""
-    
-    def __init__(self, step_size, loss, k=1, default_num_batches=20):
-        "k is the constant of proportionality"
-        self.step_size = step_size
-        self.loss = loss
-        self.k = k
-        self.previous_loss_value = jnp.nan
-        self.current_loss_value = jnp.nan
-        self.default_num_batches = default_num_batches
-        self.num_batches = default_num_batches
-    
-    def __call__(self, loss_values, batch_loss_values):
-        return len(batch_loss_values) >= self.num_batches
-    
-    def fit_pretrain(self, score_model, particles):
-        self.current_loss_value = self.loss(score_model, particles)
-        self.num_batches = self.k * jnp.log(self.current_loss_value/self.previous_loss_value) / self.step_size
-        print(f"previous loss = {self.previous_loss_value :.3f}, current loss = {self.current_loss_value :.3f}, num_batches = {self.num_batches}")
-        if self.num_batches < 1 or jnp.isnan(self.num_batches):
-            self.num_batches = self.default_num_batches
-    
-    def fit_posttrain(self, score_model, particles):
-        self.previous_loss_value = self.loss(score_model, particles)
-    
+
 class AbsoluteLossChange(GDStoppingCriterion):
     """Stop when the absolute change in loss is below a threshold"""
 
