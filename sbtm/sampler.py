@@ -104,6 +104,8 @@ class AbsoluteLossChange(GDStoppingCriterion):
             return False
         return abs(loss_values[-2] - loss_values[-1]) < self.threshold
 
+#TODO: scheduled gd stopping criterion: the number of gd steps is a function of the step number or time
+
 class SBTMSampler(ODESampler):
     """Use a NN to approximate the score"""
 
@@ -115,7 +117,7 @@ class SBTMSampler(ODESampler):
     debug: bool  # whether to print debug information
     heun: bool  # whether to use Heun's method
 
-    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumBatches(), mini_batch_size=200, debug=False, heun=True):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumBatches(), mini_batch_size=200, debug=False, heun=False):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss

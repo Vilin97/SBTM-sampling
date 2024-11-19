@@ -9,16 +9,16 @@ import os
 # os.environ["JAX_CHECK_TRACER_LEAKS"] = 'True'
 import matplotlib.pyplot as plt
 import copy
-
-#%%
+from tqdm import tqdm
+from scipy import integrate
 # reload modules
 for module in [density, plots, kernel, losses, models, sampler, stats]:
     importlib.reload(module)
 
 #%%
 # set up
-step_size = 1.
-max_steps = 4000
+step_size = 0.1
+max_steps = 50
 num_particles = 1000
 key = jrandom.key(42)
 
@@ -41,8 +41,8 @@ fig, ax = plots.plot_distributions(prior_sample, sde_sample, target_density_obj)
 ax.set_xlim(-10, 10)
 ax.set_title(fr'SDE, $\Delta t={step_size}$, $T={max_steps*step_size}$')
 fig.show()    
-plots.visualize_trajectories(sde_logger.get_trajectory('particles')[::10], max_time=max_steps*step_size)
-plots.plot_kl_divergence(sde_logger.get_trajectory('particles')[::100], target_density_obj.density)
+plots.visualize_trajectories(sde_logger.get_trajectory('particles'), max_time=max_steps*step_size)
+plots.plot_kl_divergence(sde_logger.get_trajectory('particles'), target_density_obj.density)
 # plots.plot_fisher_divergence(sde_logger.get_trajectory('particles'), target_score)
 
 #%%
@@ -89,43 +89,13 @@ sbtm_score = sbtm_logger.get_trajectory('score')
 plots.visualize_trajectories(sbtm_particles, title=fr"SBTM, $\Delta t=0.1$ if $t < 10$, $\Delta t=1$ if $t \geq 10$, $T={max_steps*step_size}$")
 plots.plot_kl_divergence(sbtm_particles, target_density_obj.density)
 plots.plot_fisher_divergence(sbtm_particles, target_score, sbtm_score)
-
 #%%
-from tqdm import tqdm
-particles = [jnp.reshape(p, -1) for p in sbtm_logger.get_trajectory('particles')[::1000]]
-particle_switches = {}
-
-for i in tqdm(range(len(particles[0]))):
-    positions = [particles[t][i] for t in range(len(particles))]
-    switches = []
-    for t in range(1, len(positions)):
-        if positions[t-1] < 0 and positions[t] > 0 or positions[t-1] > 0 and positions[t] < 0:
-            switches.append(t)
-    if switches:
-        particle_switches[i] = switches
-
-print(particle_switches)
-
-
-#%%
+# plot number of gradient descent steps
 batch_loss_values = sbtm_logger.get_trajectory('batch_loss_values')
 num_gd_steps = [len(loss_values) for loss_values in batch_loss_values]
 fig, ax = plt.subplots(figsize=(6, 6))
 plots.plot_quantity_over_time(ax, num_gd_steps, label='Number of GD steps', plot_zero_line=False, max_time=max_steps*step_size, marker='o', markersize=3)
 ax.set_title(f"Number of GD steps, avg={jnp.mean(jnp.array(num_gd_steps)):.1f}")
-
-#%%
-loss_values = sbtm_logger.get_trajectory('loss_values')[:10]
-pretrain_loss_values = [values[0] for values in loss_values]
-post_train_loss_values = [values[-1] for values in loss_values]
-zipped = list(zip(pretrain_loss_values, post_train_loss_values))
-interleaved = [val for pair in zipped for val in pair]
-fig, ax = plt.subplots(figsize=(6, 6))
-
-# plots.plot_quantity_over_time(ax, interleaved, label='interleaved')
-plots.plot_quantity_over_time(ax, pretrain_loss_values, label='Pretrain loss')
-plots.plot_quantity_over_time(ax, post_train_loss_values, label='Posttrain loss', max_time=10*step_size)
-
 #%%
 # plot the fisher divergence and time derivative of KL divergence
 steps_to_plot = 100
@@ -133,14 +103,11 @@ fig, ax = plt.subplots(figsize=(6, 6))
 smoothing = 0.5
 
 for (logger, name) in zip([sde_logger, sbtm_logger, svgd_logger], ['SDE', 'SBTM', 'SVGD']):
-    try:
-        kde_kl_divs = stats.compute_kl_divergences(logger.get_trajectory('particles'), target_density_obj.density)
-        kde_kl_divs = jnp.array(kde_kl_divs)
-        kl_div_time_derivative = -jnp.diff(kde_kl_divs) / step_size
-        kl_div_time_derivative = jnp.clip(kl_div_time_derivative, a_min=1e-5)
-        plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative[:steps_to_plot], smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, {name}', marker='o', markersize=3)
-    except:
-        print(f"Could not compute KL divergence for {name}")
+    kde_kl_divs = stats.compute_kl_divergences(logger.get_trajectory('particles'), target_density_obj.density)
+    kde_kl_divs = jnp.array(kde_kl_divs)
+    kl_div_time_derivative = -jnp.diff(kde_kl_divs) / step_size
+    kl_div_time_derivative = jnp.clip(kl_div_time_derivative, a_min=1e-5)
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative[:steps_to_plot], smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, {name}', marker='o', markersize=3)
 
 particles = sbtm_logger.get_trajectory('particles')
 sbtm_scores = sbtm_logger.get_trajectory('score')
@@ -157,22 +124,26 @@ fig.show()
 
 #%%
 # plot the KL divergence estimates
-from scipy import integrate
 steps_to_plot = 100
 fig, ax = plt.subplots(figsize=(6, 6))
+smoothing = 0.5
+
+for (logger, name) in zip([sde_logger, sbtm_logger], ['SDE', 'SBTM']):
+    kde_kl_divs = stats.compute_kl_divergences(logger.get_trajectory('particles'), target_density_obj.density)
+    plots.plot_quantity_over_time(ax, stats.ema(kde_kl_divs[:steps_to_plot], smoothing), label=rf'$KL(f_t||\pi)$, {name}', marker='o', markersize=3)
+
+particles = sbtm_logger.get_trajectory('particles')
+sbtm_scores = sbtm_logger.get_trajectory('score')
+sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(particles, sbtm_scores, target_score))
 integral_of_fisher_divs_1 = integrate.cumulative_trapezoid(sbtm_fisher_divs, dx=step_size, initial=0.)
 integral_of_fisher_divs_2 = jnp.cumulative_sum(jnp.array(sbtm_fisher_divs), include_initial=True) * step_size
 sbtm_kl_divs_1 = kde_kl_divs[0] - integral_of_fisher_divs_1
 sbtm_kl_divs_2 = kde_kl_divs[0] - integral_of_fisher_divs_2
-plots.plot_quantity_over_time(ax, kde_kl_divs[:steps_to_plot], label='KDE estimate of KL', marker='o', markersize=3)
 plots.plot_quantity_over_time(ax, sbtm_kl_divs_1[:steps_to_plot], label='NN estimate, trapezoid rule')
 plots.plot_quantity_over_time(ax, sbtm_kl_divs_2[:steps_to_plot], label='NN estimate, left Riemann sum', max_time=max_steps*step_size)
 
 ax.set_title("KL Divergence Estimates")
 fig.show()
-
-#%%
-# Compare the KL divergence of SDE and SBTM samplers over time
 
 #%%
 # Annealing: sample from noised target, use the sample as initial condition for less noised target, etc
@@ -220,3 +191,4 @@ plots.plot_losses(loss_values, batch_loss_values)
 plots.plot_fisher_divergence(logger.get_trajectory('particles')[::10], target_score, logger.get_trajectory('score')[::10])
 
 # %%
+# TODO: instead of annealing, try simulated tempering: target_score / temperature, temperature(t=0) = large, temperature(t=T) = 1
