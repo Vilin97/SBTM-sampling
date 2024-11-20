@@ -13,9 +13,13 @@ import matplotlib.pyplot as plt
 import copy
 from tqdm import tqdm
 from scipy import integrate
+from jax.scipy.stats import gaussian_kde
+
 # reload modules
 for module in [density, plots, kernel, losses, models, sampler, stats]:
     importlib.reload(module)
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 #%%
 # set up
@@ -26,7 +30,7 @@ def f(t, x):
 
 step_size = 0.01
 max_steps = 500
-num_particles = 1000
+num_particles = 10000
 key = jrandom.key(42)
 t0 = 0.1
 
@@ -122,7 +126,7 @@ fig, ax = plt.subplots(figsize=(6, 6))
 plots.plot_quantity_over_time(ax, sde_cov_diff, label='SDE', yscale='log', max_time=max_steps*step_size)
 plots.plot_quantity_over_time(ax, sbtm_cov_diff, label='SBTM', yscale='log', max_time=max_steps*step_size)
 ax.set_ylabel(rf'$||\Sigma_t - \Sigma_{{\text{{analytic}}}}||_F$')
-ax.set_title('Covariance comparision with analytic solution')
+ax.set_title(f'Covariance comparision with analytic solution, n={num_particles}')
 
 # %%
 # Compute and plot the explicit score matching loss of sbtm using the score of the analytic solution
@@ -137,7 +141,87 @@ for t_idx, t in enumerate(jnp.linspace(t0, t0 + max_steps * step_size, max_steps
     sbtm_explicit_loss.append(loss_value)
 
 fig, ax = plt.subplots(figsize=(6, 6))
-plots.plot_quantity_over_time(ax, sbtm_explicit_loss, label='', yscale='linear', max_time=max_steps*step_size)
+plots.plot_quantity_over_time(ax, sbtm_explicit_loss, label='', yscale='log', max_time=max_steps*step_size)
 ax.set_ylabel(r'$\frac{1}{n} \sum_i ||\nabla \log f_t^*(x_i) - s_t(x_i)||^2$')
-ax.set_title('Explicit Score Matching Loss of SBTM over time')
+ax.set_title(f'Explicit Score Matching Loss of SBTM over time, n={num_particles}')
+fig.show()
+
+#%%
+# plot the fisher divergence and time derivative of KL divergence
+steps_to_plot = max_steps
+fig, ax = plt.subplots(figsize=(6, 6))
+smoothing = 0.5
+yscale = 'log'
+
+def relative_entropy_gaussians(mean1, cov1, mean2, cov2):
+    dim = mean1.shape[0]
+    cov2_inv = jnp.linalg.inv(cov2)
+    mean_diff = mean2 - mean1
+    term1 = jnp.trace(cov2_inv @ cov1)
+    term2 = mean_diff.T @ cov2_inv @ mean_diff
+    term3 = -dim
+    term4 = jnp.log(jnp.linalg.det(cov2) / jnp.linalg.det(cov1))
+    return 0.5 * (term1 + term2 + term3 + term4)
+
+analytic_kl_divs = []
+for t in tqdm(jnp.linspace(t0, t0 + max_steps * step_size, max_steps)[:steps_to_plot], desc="Computing analytic KL divergences"):
+    K_t = K(t)
+    analytic_cov = jnp.array([[K_t]])
+    analytic_kl_div = relative_entropy_gaussians(jnp.array([0.]), analytic_cov, target_params['mean'], target_params['covariance'])
+    analytic_kl_divs.append(analytic_kl_div)
+
+analytic_kl_div_time_derivative = -jnp.diff(jnp.array(analytic_kl_divs)) / step_size
+analytic_kl_div_time_derivative = jnp.clip(analytic_kl_div_time_derivative, a_min=1e-5)
+plots.plot_quantity_over_time(ax, stats.ema(analytic_kl_div_time_derivative[:steps_to_plot], smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, Analytic', marker='o', markersize=3, yscale=yscale)
+
+for (logger, name) in zip([sde_logger, sbtm_logger], ['SDE', 'SBTM']):
+    particles = logger.get_trajectory('particles')[:steps_to_plot]
+    kde_kl_divs = stats.compute_kl_divergences(particles, target_density_obj.density)
+    kde_kl_divs = jnp.array(kde_kl_divs)
+    kl_div_time_derivative = -jnp.diff(kde_kl_divs) / step_size
+    kl_div_time_derivative = jnp.clip(kl_div_time_derivative, a_min=1e-5)
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative[:steps_to_plot], smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, {name}', marker='o', markersize=3, yscale=yscale)
+
+particles = sbtm_logger.get_trajectory('particles')[:steps_to_plot]
+sbtm_scores = sbtm_logger.get_trajectory('score')[:steps_to_plot]
+sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(particles, sbtm_scores, target_score))
+plots.plot_quantity_over_time(ax, stats.ema(sbtm_fisher_divs[:steps_to_plot], smoothing), label=r'NN: $\frac{1}{n}\sum_{i=1}^n\|\nabla \log \pi_t(X_i) - s(X_i)\|^2$', yscale=yscale)
+
+kde_scores = [stats.compute_score(sample_f) for sample_f in particles]
+kde_fisher_divs = jnp.array(stats.compute_fisher_divergences(particles, kde_scores, target_score))
+plots.plot_quantity_over_time(ax, stats.ema(kde_fisher_divs[:steps_to_plot], smoothing), label=r'KDE: $\frac{1}{n}\sum_{i=1}^n\|\nabla \log \pi_t(X_i) - \nabla \frac{1}{n}\sum_{j=1}^n \phi_\varepsilon(X_i-X_j)\|^2$', max_time=steps_to_plot*step_size, yscale=yscale)
+
+ax.set_title("KL divergence decay rate")
+fig.show()
+
+#%%
+# Compare L2 distance to the analytic solution
+
+sde_l2_diff = []
+sbtm_l2_diff = []
+
+for t_idx, t in tqdm(list(enumerate(jnp.linspace(t0, t0 + max_steps * step_size, max_steps)))):
+    sde_particles_t = sde_logger.get_trajectory('particles')[t_idx]
+    sbtm_particles_t = sbtm_logger.get_trajectory('particles')[t_idx]
+    
+    # KDE for SDE particles
+    sde_kde = gaussian_kde(sde_particles_t.T)
+    sde_density = sde_kde(sde_particles_t.T)
+    
+    # KDE for SBTM particles
+    sbtm_kde = gaussian_kde(sbtm_particles_t.T)
+    sbtm_density = sbtm_kde(sbtm_particles_t.T)
+    
+    # True density
+    true_density = f(t, sde_particles_t)
+    
+    # Compute L2 distance
+    sde_l2_diff.append(jnp.linalg.norm(sde_density - true_density) / num_particles)
+    sbtm_l2_diff.append(jnp.linalg.norm(sbtm_density - true_density) / num_particles)
+
+fig, ax = plt.subplots(figsize=(6, 6))
+plots.plot_quantity_over_time(ax, sde_l2_diff, label='SDE', yscale='log', max_time=max_steps*step_size)
+plots.plot_quantity_over_time(ax, sbtm_l2_diff, label='SBTM', yscale='log', max_time=max_steps*step_size)
+ax.set_ylabel(r'$\frac{1}{n}\sum_{i=1}^n ||\hat{f}_t(X_i) - f_t(X_i)||_2$')
+ax.set_title(f'L2 distance between KDE and true solution, n={num_particles}')
 fig.show()
