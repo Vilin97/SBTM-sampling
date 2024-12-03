@@ -64,10 +64,11 @@ plots.plot_kl_divergence(svgd_logger.get_trajectory('particles'), target_density
 mlp = models.MLP(d=1)
 score_model = models.ResNet(mlp)
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+prior_score_values = prior_score(prior_sample)
 for i in range(100):
     if i % 10 == 0:
-        print(losses.explicit_score_matching_loss(score_model, prior_sample, prior_score(prior_sample)))
-    loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_sample, prior_score(prior_sample))
+        print(losses.explicit_score_matching_loss(score_model, prior_sample, prior_score_values))
+    loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_sample, prior_score_values)
     optimizer.update(grads)
 print(losses.explicit_score_matching_loss(score_model, prior_sample, prior_score(prior_sample)))
 #%%

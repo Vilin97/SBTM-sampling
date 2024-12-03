@@ -52,7 +52,18 @@ def explicit_score_matching_loss(s, particles, target_score_values):
     Compute the score matching loss between the vector field s and the true score.
     1/n ∑ᵢ ||s(xᵢ) - ∇log f*(xᵢ)||²
     """
-    return jnp.square(s(particles) - target_score_values).mean()
+    return jnp.sum(jnp.square(s(particles) - target_score_values)) / particles.shape[0]
+
+@nnx.jit
+def weighted_explicit_score_matching_loss(s, particles, target_score_values, weighting):
+    """
+    Compute the weighted score matching loss between the vector field s and the true score.
+    1/n ∑ᵢ ⟨s(xᵢ) - ∇log f*(xᵢ), D[i] (s(xᵢ) - ∇log f*(xᵢ))⟩
+    """
+    def weighted_loss(x, target, D):
+        diff = s(x) - target
+        return jnp.dot(diff, jnp.dot(D, diff))
+    return jnp.mean(jax.vmap(weighted_loss)(particles, target_score_values, weighting))
 
 @nnx.jit
 def implicit_score_matching_loss(s, particles):

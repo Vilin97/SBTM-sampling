@@ -4,6 +4,11 @@ from jax.scipy.stats import multivariate_normal
 import equinox as eqx
 
 
+def score(density, x):
+    log_density = lambda x: jnp.clip(jnp.log(density(x)), a_min=-1e10, a_max=1e10)
+    score_fun = jax.grad(log_density, argnums=0)
+    return jax.vmap(score_fun)(x)
+
 class Density(eqx.Module):
     """General Density class for a given probability density function."""
 
@@ -21,9 +26,7 @@ class Density(eqx.Module):
         return jax.vmap(self.density)(x)
 
     def score(self, x):
-        log_density = lambda x: jnp.clip(jnp.log(self.density(x)), a_min=-1e10, a_max=1e10)
-        score_fun = jax.grad(log_density, argnums=0)
-        return jax.vmap(score_fun)(x)
+        score(self.density, x)
 
 
 # Define a unimodal gaussian pdf
