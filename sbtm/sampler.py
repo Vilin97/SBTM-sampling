@@ -32,7 +32,11 @@ class Sampler:
 
     def __init__(self, particles, target_score, step_sizes, max_steps, logger):
         self.particles = particles
-        self.target_score = target_score
+        try:
+            target_score(particles)
+            self.target_score = lambda t, x: target_score(x)
+        except TypeError:
+            self.target_score = target_score
         self.step_sizes = [step_sizes] * max_steps if isinstance(step_sizes, (int, float)) else step_sizes
         self.max_steps = max_steps
         self.logger = logger
@@ -70,7 +74,8 @@ class SDESampler(Sampler):
         self.key, subkey = jrandom.split(self.key)
         n, dim = self.particles.shape
         noise = jrandom.multivariate_normal(subkey, jnp.zeros((n, dim)), jnp.eye(dim))
-        drift = self.target_score(self.particles)
+        t = step_number * self.step_sizes[step_number]
+        drift = self.target_score(t, self.particles)
         velocity = self.step_sizes[step_number] * drift + jnp.sqrt(2 * self.step_sizes[step_number]) * noise
         self.particles += velocity
         return {'noise': noise, 'velocity': velocity}
@@ -132,14 +137,15 @@ class SBTMSampler(ODESampler):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
         loss_values, batch_loss_values = self.train_model()
         score = self.score_model(self.particles)
+        t = step_number * self.step_sizes[step_number]
         if self.heun:
-            drift = self.target_score(self.particles) - score
+            drift = self.target_score(t, self.particles) - score
             intermediate_particles = self.particles + self.step_sizes[step_number] * drift
             intermediate_score = self.score_model(intermediate_particles)
-            intermediate_drift = self.target_score(intermediate_particles) - intermediate_score
+            intermediate_drift = self.target_score(t, intermediate_particles) - intermediate_score
             velocity = self.step_sizes[step_number] * 0.5 * (drift + intermediate_drift)
         else:
-            drift = self.target_score(self.particles) - score
+            drift = self.target_score(t, self.particles) - score
             velocity = self.step_sizes[step_number] * drift
         self.particles += velocity
         return {'score': score, 'velocity': velocity, 'loss_values': loss_values, 'batch_loss_values': batch_loss_values}
@@ -199,7 +205,7 @@ class SVGDSampler(ODESampler):
         num_particles = particles.shape[0]
         gram_matrix = self.kernel_obj(particles, particles, width)  # k(xⱼ, xᵢ)
         kernel_gradient = self.kernel_obj.gradient_wrt_first_arg(particles, particles, width)  # ∇ⱼ log k(xⱼ, xᵢ)
-        score_matrix = self.target_score(particles)  # ∇ log π(x)
+        score_matrix = self.target_score(step_number*self.step_sizes[step_number], particles)  # ∇ log π(x)
 
         kernel_score_term = jnp.einsum("ij,jk->ik", gram_matrix, score_matrix)  # ∑ⱼ k(xⱼ, xᵢ) ⋅ ∇ log π(xⱼ)
         kernel_gradient_term = jnp.sum(kernel_gradient, axis=0)  # ∑ⱼ ∇ⱼ log k(xⱼ, xᵢ)

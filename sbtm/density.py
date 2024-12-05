@@ -26,7 +26,7 @@ class Density(eqx.Module):
         return jax.vmap(self.density)(x)
 
     def score(self, x):
-        score(self.density, x)
+        return score(self.density, x)
 
 
 # Define a unimodal gaussian pdf
