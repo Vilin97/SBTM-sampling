@@ -54,6 +54,8 @@ class Sampler:
             if jnp.isnan(self.particles).any():
                 raise ValueError(f"Instability detected at step {step_number}")
 
+        to_log = {'particles': self.particles, 'step_number': step_number+1, 'step_size': step_size}
+        self.logger.log(to_log)
         return self.particles
 
     def step(self):

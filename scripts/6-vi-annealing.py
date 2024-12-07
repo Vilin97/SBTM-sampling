@@ -1,5 +1,6 @@
-"""Anneal the target \pi to interpolate betwenn standard gaussian and \pi"""
 #%%
+"""Anneal the target \pi to interpolate betwenn standard gaussian and \pi"""
+
 import numpy as np
 from scipy.stats import norm
 from scipy.integrate import quad
@@ -73,17 +74,6 @@ plt.ylabel('Density')
 plt.legend()
 plt.show()
 
-# plt.figure(figsize=(10, 6))
-# for t in t_values:
-#     f = dilation_interpolation(target_density, t)
-#     plt.plot(x, f(x), label=f't={t}')
-
-# plt.title(r'Dilation Interpolation $f(x/\sqrt{t})$')
-# plt.xlabel('x')
-# plt.ylabel('Density')
-# plt.legend()
-# plt.show()
-
 plt.figure(figsize=(10, 6))
 for t in t_values:
     f = geometric_interpolation(standard_gaussian, target_density, t)
@@ -97,8 +87,8 @@ plt.show()
 
 #%%
 # set up
-step_size = 0.1
-max_steps = 100
+step_size = 0.01
+max_steps = 1000
 t_end = step_size * max_steps
 num_particles = 1000
 key = jrandom.key(42)
@@ -108,13 +98,16 @@ prior_density_obj = density.Density(density.gaussian_pdf, prior_params)
 prior_sample = jrandom.multivariate_normal(key, prior_params['mean'], prior_params['covariance'], shape=(num_particles,))
 prior_score = density.Density(density.gaussian_pdf, prior_params).score
 
-target_params = {'mean': [jnp.array([-5]), jnp.array([5])], 'covariance': [jnp.array([[1.]]), jnp.array([[1.]])], 'weights': jnp.array([1/10, 1-1/10])}
-target_density_obj = density.Density(density.gaussian_mixture_pdf, target_params)
-target_score = target_density_obj.score
-plt.plot(jnp.linspace(-10, 10, 1000), prior_density_obj.density(jnp.reshape(jnp.linspace(-10, 10, 1000), (1000,1))), label='Prior Density')
-plt.plot(jnp.linspace(-10, 10, 1000), target_density_obj.density(jnp.reshape(jnp.linspace(-10, 10, 1000), (1000,1))), label='Target Density')
-plt.legend()
-plt.show()
+
+def target_density(x):
+    return 0.1 * jax.scipy.stats.norm.pdf(x, -5, 1) + 0.9 * jax.scipy.stats.norm.pdf(x, 5, 1)
+
+target_score = lambda x: density.score(lambda y: target_density(y)[0], x)
+
+# plt.plot(jnp.linspace(-10, 10, 1000), prior_density_obj.density(jnp.reshape(jnp.linspace(-10, 10, 1000), (1000,1))), label='Prior Density')
+# plt.plot(jnp.linspace(-10, 10, 1000), target_density(jnp.reshape(jnp.linspace(-10, 10, 1000), (1000,1))), label='Target Density')
+# plt.legend()
+# plt.show()
 
 # %%
 def dilate(f, tol=5e-2):
@@ -131,112 +124,99 @@ def λ(t):
 convex_combo_score = lambda t, x: convex_combo(prior_score(x), target_score(x))(λ(t))
 dilate_score = lambda t, x: dilate(target_score)(λ(t), x)
 convex_combo_dilate_score = lambda t, x: convex_combo(prior_score(x), dilate_score(t, x))(λ(t))
-#%%
-time_points = np.linspace(0, t_end, 5)[1:-1]  # 3 time points between 0 and t_end, without end-points
-x = jnp.linspace(-2.5, 2.5, 1000)
 
-plt.figure(figsize=(10, 6))
-line_styles = ['-', '--', '-.']
-colors = ['b', 'g', 'r']
-for idx, t in enumerate(time_points):
-    line_style = line_styles[idx % len(line_styles)]
-    
-    convex_combo_score_vals = convex_combo_score(t, x)
-    dilate_score_vals = dilate_score(t, x)
-    convex_combo_dilate_score_vals = convex_combo_dilate_score(t, x)
-    target_score_vals = target_score(x)
-
-    plt.plot(x, convex_combo_score_vals, line_style, color=colors[0], label=f'Convex Combo Score at t={t:.2f}')
-    plt.plot(x, dilate_score_vals, line_style, color=colors[1], label=f'Dilate Score at t={t:.2f}')
-    plt.plot(x, convex_combo_dilate_score_vals, line_style, color=colors[2], label=f'Convex Combo Dilate Score at t={t:.2f}')
-
-plt.plot(x, target_score_vals, '-', color='black', linewidth=2, label='Target Score')
-plt.title('Scores at Different Time Points')
-plt.xlabel('x')
-plt.ylabel('Score')
-plt.legend()
-plt.show()
 # %%
 # sample with sde
 # annealed_scores = [convex_combo_score, dilate_score, convex_combo_dilate_score, target_score]
-annealed_scores = [lambda t, x: density.score(lambda y: gaussian_interpolation(y, λ(t))[0], x)]
 
-for annealed_score in annealed_scores:
+#LESSON LEARNED: with higher number of steps and also bigger end time, the weights on the two mixtures get closer to the correct 0.1 and 0.9 values. E.g. with 1000 steps and 0.1 step size, get 34% and 66% weights.
+
+for (step_size, max_steps) in [(0.05, 10000)]:
+    t_end = step_size * max_steps
+    def λ(t):
+        """interpolate between 0 and 1"""
+        t = (t/t_end)**2
+        return min((t/0.9), 1)
+
+    def annealed_score1(t, x, threshold=0.2):
+        # t = t/t_end
+        # t = t/(1-threshold)
+        t = np.clip(t, threshold, 1)
+        return target_score(x/t)
+
+    def annealed_score2(t, x, threshold=0.3):
+        t = t/t_end
+        t = t/(1-threshold)
+        t = np.clip(t, threshold, 1)
+        return target_score(x/t)/t
+
+    # annealed_score = lambda t, x: density.score(lambda y: gaussian_interpolation(y, λ(t))[0], x)
+    annealed_score = lambda t,x : annealed_score1(λ(t), x)
+
     sde_logger = sampler.Logger()
     sde_sampler = sampler.SDESampler(prior_sample, annealed_score, step_size, max_steps, sde_logger)
     sde_sample = sde_sampler.sample()
-    
-    fig, ax = plots.plot_distributions(prior_sample, sde_sample, target_density_obj)
-    ax.set_xlim(-10, 10)
-    ax.set_title(fr'SDE, $\Delta t={step_size}$, $T={max_steps*step_size}$')
-    fig.show()    
-    
-    
+
+    # count
+    particles = sde_logger.get_trajectory('particles')
+    print(f"Step size={step_size}, Max steps={max_steps}")
+    for i in range(0, max_steps+1, max_steps//10):
+        p = particles[i][:,0]    
+        negative_count = np.sum(p < 0)
+        print(f"i={i}, Count of particles < 0: {negative_count}")
+
+    #plot
+    particles = sde_logger.get_trajectory('particles')
+    time_steps = np.linspace(0, max_steps, 11)
+    x = np.linspace(-10, 10, 1000)
+    plt.figure(figsize=(10, 6))
+    for time_step in tqdm(time_steps):
+        t = time_step * step_size
+        color = plt.cm.plasma(time_step / max_steps)
+        particle_array = particles[int(time_step)].reshape(-1)
+        kde = gaussian_kde(particle_array, bw_method='silverman')
+        plt.plot(x, kde(x), color=color, label=f'KDE t={t:.2f}')
+
+    plt.plot(x, target_density(x), 'r--', label='Target Density')
+
+    plt.title('KDE of Particles at Different Time Steps')
+    plt.xlabel('x')
+    plt.ylabel('Density')
+    plt.legend()
+    plt.show()
+
+# fig, ax = plots.plot_distributions(prior_sample, sde_sample, target_density_obj)
+# ax.set_xlim(-10, 10)
+# ax.set_title(fr'SDE, $\Delta t={step_size}$, $T={max_steps*step_size}$')
+# fig.show()
+
 #%%
-# Define different lambda functions
-lambdas = [
-    lambda t: min((t / 0.5), 1),
-    lambda t: t,
-    lambda t: t**2,
-    lambda t: np.sqrt(t)
-]
-
-# Define annealing variants
-annealing_variants = {
-    'convex_combo': convex_combo_score,
-    'dilate': dilate_score,
-    'convex_combo_dilate': convex_combo_dilate_score,
-    'none': target_score
-}
-
-results = {}
-
-# Run experiments
-for lambda_func in lambdas:
-    for name, annealed_score in annealing_variants.items():
-        sde_logger = sampler.Logger()
-        sde_sampler = sampler.SDESampler(prior_sample, annealed_score, step_size, max_steps, sde_logger)
-        sde_sample = sde_sampler.sample()
-        
-        # Save particles
-        particles = sde_logger.get_trajectory('particles')
-        filename = f'particles_{name}_lambda_{lambda_func.__name__}.pkl'
-        with open(filename, 'wb') as f:
-            pickle.dump(particles, f)
-        
-        # Compute KL divergence
-        kl_div = stats.kl_divergence(sde_sample, target_density_obj.density)
-        results[(name, lambda_func.__name__)] = kl_div
-
-# Find the best setting
-best_setting = min(results, key=results.get)
-print(f'Best setting: {best_setting} with KL divergence: {results[best_setting]}')
-
-# Load and plot the best particles
-best_name, best_lambda = best_setting
-filename = f'particles_{best_name}_lambda_{best_lambda}.pkl'
-with open(filename, 'rb') as f:
-    best_particles = pickle.load(f)
-
-time_steps = np.linspace(0, max_steps-1, 5)
+particles = sde_logger.get_trajectory('particles')
+time_steps = np.linspace(0, max_steps, 11)
 x = np.linspace(-10, 10, 1000)
-
 plt.figure(figsize=(10, 6))
 for time_step in tqdm(time_steps):
     t = time_step * step_size
     color = plt.cm.plasma(time_step / max_steps)
-    f = geometric_interpolation(prior_density_obj, target_density_obj, annealing_schedule(t / t_end))
-    plt.plot(x, f(x), '--', color=color, label=f'Interpolated t={t:.2f}')
-
-    particle_array = best_particles[int(time_step)].reshape(-1)
+    particle_array = particles[int(time_step)].reshape(-1)
     kde = gaussian_kde(particle_array, bw_method='silverman')
     plt.plot(x, kde(x), color=color, label=f'KDE t={t:.2f}')
 
-plt.title('Interpolated Density and KDE of Particles')
+plt.plot(x, target_density(x), 'r--', label='Target Density')
+
+plt.title('KDE of Particles at Different Time Steps')
 plt.xlabel('x')
 plt.ylabel('Density')
 plt.legend()
 plt.show()
+
+#%%
+particles = sde_logger.get_trajectory('particles')
+print(f"Step size={step_size}, Max steps={max_steps}")
+for i in range(0, max_steps+1, max_steps//10):
+    p = particles[i][:,0]    
+    negative_count = np.sum(p < 0)
+    print(f"i={i}, Count of particles < 0: {negative_count}")
 
 #%%
 fig, ax = plots.plot_distributions(prior_sample, sde_sample, target_density_obj)
@@ -244,7 +224,7 @@ ax.set_xlim(-10, 10)
 ax.set_title(fr'SDE, $\Delta t={step_size}$, $T={max_steps*step_size}$')
 fig.show()    
 # plots.visualize_trajectories(sde_logger.get_trajectory('particles'), max_time=max_steps*step_size)
-# plots.plot_kl_divergence(sde_logger.get_trajectory('particles'), target_density_obj.density)
+# plots.plot_kl_divergence(sde_logger.get_trajectory('particles'), target_density)
 
 # %%
 particles = sde_logger.get_trajectory('particles')
