@@ -181,16 +181,6 @@ for (step_size, max_steps) in [(0.02, 100), (0.02, 1000), (0.02, 10000)]:#, (0.0
             plt.savefig(f'plots/annealing/dilation/kde_particles_{step_size}_{max_steps}_lambda_{lambda_name}.png')
             # plt.savefig(f'plots/annealing/geometric_mean/kde_particles_{step_size}_{max_steps}_lambda_{lambda_name}.png')
             plt.show()
-
-            plt.plot(x, target_density(x), 'r--', label='Target Density')
-
-            plt.title('KDE of Particles at Different Time Steps')
-            plt.xlabel('x')
-            plt.ylabel('Density')
-            plt.legend()
-            plt.savefig(f'plots/annealing/dilation/kde_particles_{step_size}_{max_steps}_lambda_{lambda_name}.png')
-            # plt.savefig(f'plots/annealing/geometric_mean/kde_particles_{step_size}_{max_steps}_lambda_{lambda_name}.png')
-            plt.show()
         except Exception as e:
             print(f"Error: {e}")
 
