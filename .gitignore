@@ -2,7 +2,10 @@
 /data/*
 /models/*
 /reports/*
+/plots
 
+
+*.png
 
 # pycharm specific files
 *.egg-info
