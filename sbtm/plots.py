@@ -7,7 +7,7 @@ from jax.scipy.stats import gaussian_kde
 from tqdm import tqdm
 from sbtm import stats
 
-def plot_distributions(initial_particles, transported_particles, density_obj):
+def plot_distributions(initial_particles, transported_particles, density):
     """Plot the initial and transported particles, and the target density function"""
     fig, ax = plt.subplots(figsize=(10, 6))
     x = np.linspace(min(initial_particles + transported_particles) - 1, 
@@ -26,7 +26,7 @@ def plot_distributions(initial_particles, transported_particles, density_obj):
     ax.plot(x, kde_transported, 'g-', lw=2, label='Transported KDE')
 
     # Plot the target density function
-    y = jax.vmap(density_obj.density)(x)
+    y = density(x)
     ax.plot(x, y, 'r-', lw=2, label='Target Distribution')
 
     ax.set_xlabel('Particle Value', fontsize=20)
