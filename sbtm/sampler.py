@@ -22,7 +22,6 @@ class Logger:
     def log_hyperparameters(self, hyperparameters):
         self.hyperparameters.update(hyperparameters)
 
-# TODO: adaptive stepping: step_size ~ 1/|∇ log π(x)|^2
 class State:
     def __init__(self, particles):
         self.particles = particles
@@ -74,8 +73,6 @@ class Sampler:
             if jnp.isnan(self.state.particles).any():
                 raise ValueError(f"Instability detected at step {step_number}")
 
-        to_log = {'particles': self.state.particles, 'step_number': step_number+1, 'step_size': step_size}
-        self.logger.log(to_log)
         return self.state.particles
 
     def step(self):
@@ -152,7 +149,7 @@ class SBTMSampler(ODESampler):
     debug: bool  # whether to print debug information
     heun: bool  # whether to use Heun's method
 
-    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumBatches(), mini_batch_size=200, debug=False, heun=False):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=AbsoluteLossChange(), mini_batch_size=100, debug=False, heun=False):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
@@ -161,7 +158,8 @@ class SBTMSampler(ODESampler):
         self.mini_batch_size = mini_batch_size
         self.debug = debug
         self.heun = heun
-        self.logger.log_hyperparameters({'mini_batch_size': mini_batch_size, 'optimizer': optimizer, 'gd_stopping_criterion': gd_stopping_criterion, 'heun': heun})
+        self.logger.log_hyperparameters({'mini_batch_size': mini_batch_size, 'heun': heun})
+        # self.logger.log_hyperparameters({'optimizer': optimizer, 'gd_stopping_criterion': gd_stopping_criterion})
 
     def step(self, step_number):
         """Lines 4,5 of algorithm 1 in https://arxiv.org/pdf/2206.04642"""
@@ -178,6 +176,8 @@ class SBTMSampler(ODESampler):
             drift = self.target_score(t, self.state.particles) - score
             velocity = self.step_size(step_number) * drift
         self.state.particles += velocity
+        if self.debug:
+            print(f"Step {step_number}: mean score={jnp.mean(jnp.abs(score)):.3f}, mean velocity={jnp.mean(jnp.abs(velocity)):.3f}, mean particles={jnp.mean(jnp.abs(self.state.particles)):.3f}")
         return {'score': score, 'velocity': velocity, 'loss_values': loss_values, 'batch_loss_values': batch_loss_values}
 
     def train_model(self):
@@ -195,6 +195,8 @@ class SBTMSampler(ODESampler):
                 batch = self.state.particles[batch_start:batch_end, :]
                 loss_value = opt_step(self.score_model, self.optimizer, self.loss, batch)
                 batch_loss_values.append(loss_value)
+            if self.debug:
+                print(f"Loss: {loss_values[-1]}")
         
         loss_values.append(self.loss(self.score_model, self.state.particles))
         return loss_values, batch_loss_values
