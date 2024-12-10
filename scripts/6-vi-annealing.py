@@ -282,3 +282,65 @@ for (step_size, max_steps) in [(0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)]
             pickle.dump(log_data, f)
 
 #%%
+# TODO: Compare d/dt KL(f_t || π_t) and -∫⟨s - ∇log π, s - ∇log π_t⟩ df_t. They should be equal, up to time discretization and score matching errors.
+# Load the logger data from pickle file
+step_size = 0.1
+max_steps = 1000
+lambda_name = 't'
+data_dir = os.path.expanduser('~/SBTM-sampling/data/annealing/sbtm/geometric_mean')
+
+with open(os.path.join(data_dir, f'logger_{step_size}_{max_steps}_lambda_{lambda_name}.pkl'), 'rb') as f:
+    log_data = pickle.load(f)
+
+logger = sampler.Logger()
+logger.logs = log_data['logs']
+logger.hyperparameters = log_data['hyperparameters']
+
+#%%
+# Compute the new quantity
+yscale = 'linear'
+plot_every_k = 10
+
+t_end = step_size * max_steps
+annealed_score = lambda t,x : geometric_mean_score(λ(t, t_end), x, prior_score, target_score)
+particles = logger.get_trajectory('particles')[1::plot_every_k]
+scores = logger.get_trajectory('score')[1::plot_every_k]
+times = logger.get_trajectory('time')[1::plot_every_k]
+new_quantity = []
+
+for t, particles_i, scores_i in tqdm(list(zip(times, particles, scores)), desc="Computing new quantity"):
+    annealed_score_values = annealed_score(t, particles_i)
+    target_score_values = target_score(particles_i)
+    value = jnp.sum((scores_i - target_score_values) * (scores_i - annealed_score_values)) / particles_i.shape[0]
+    new_quantity.append(value)
+
+kl_divs = stats.compute_kl_divergences(logger.get_trajectory('particles'), target_density)
+kl_div_time_derivative = -jnp.diff(jnp.array(kl_divs)) / step_size
+kl_div_time_derivative = jnp.clip(kl_div_time_derivative, a_min=1e-5)
+
+fig, ax = plt.subplots(figsize=(10, 6))
+smoothing = 0.0
+
+plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative[1::plot_every_k], smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$', marker='o', markersize=3, yscale=yscale, max_time=t_end)
+plots.plot_quantity_over_time(ax, stats.ema(new_quantity, smoothing), label=r'$\frac{1}{n}\sum_{i=1}^n (s(x_i) - \nabla \log \pi(x_i)) \cdot (s(x_i) - \nabla \log \pi_t(x_i))$', yscale=yscale)
+
+ax.set_title("KL divergence decay rate and annealed Fisher divergence")
+ax.set_xlabel('Time')
+ax.set_ylabel('Value')
+ax.legend()
+ax.grid(True)
+plt.savefig(os.path.join(plot_dir, f'new_quantity_{step_size}_{max_steps}_lambda_{lambda_name}.png'))
+plt.show()
+
+#%%
+t = times[0]
+particles_i = particles[0]
+scores_i = scores[0]
+annealed_score_values = annealed_score(t, particles_i)
+target_score_values = target_score(particles_i)
+
+value = jnp.sum((scores_i - target_score_values) * (scores_i - annealed_score_values)) / particles_i.shape[0]
+value
+
+#%%
+# TODO: train an NN on the SDE path, see if it can learn the score function as well as over the SBTM path

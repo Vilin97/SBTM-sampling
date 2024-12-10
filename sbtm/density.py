@@ -7,7 +7,9 @@ import equinox as eqx
 def score(density, x):
     log_density = lambda x: jnp.clip(jnp.log(density(x)), a_min=-1e10, a_max=1e10)
     score_fun = jax.grad(log_density, argnums=0)
-    return jax.vmap(score_fun)(x)
+    result = jax.vmap(score_fun)(x)
+    result = jnp.nan_to_num(result, nan=0.0)
+    return result
 
 class Density(eqx.Module):
     """General Density class for a given probability density function."""
