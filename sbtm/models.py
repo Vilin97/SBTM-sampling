@@ -1,4 +1,5 @@
 from flax import nnx
+import jax.numpy as jnp
 
 class MLP(nnx.Module):
     """Muti-Layer Perceptron"""
@@ -24,12 +25,26 @@ class ResNet(nnx.Module):
     Args:
         mlp (MLP): a multi-layer perceptron
     """
-    def __init__(self, mlp):
+    def __init__(self, mlp, seed=0):
         self.mlp = mlp
+        rngs = nnx.Rngs(seed)
+
+        # Create a list of projections, one per hidden layer
+        self.projections = []
+        for layer in mlp.hidden_units:
+            in_dim, out_dim = layer.kernel.shape
+            # If input dim doesn't match output dim of this layer, create a projection
+            if in_dim != out_dim:
+                self.projections.append(nnx.Linear(in_dim, out_dim, rngs=rngs))
+            else:
+                self.projections.append(None)
 
     def __call__(self, x):
-        mlp = self.mlp
-        for layer in mlp.hidden_units:
-            x = mlp.activation(layer(x)) + x
-        x = mlp.linear_out(x)
+        for layer, projection in zip(self.mlp.hidden_units, self.projections):
+            residual = x
+            if projection is not None:
+                # Project residual to match layer's output dimension
+                residual = projection(residual)
+            x = self.mlp.activation(layer(x)) + residual
+        x = self.mlp.linear_out(x)
         return x

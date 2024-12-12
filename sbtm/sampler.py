@@ -33,6 +33,7 @@ class State:
         self.t += step_size
         self.step_number += 1
 
+# TODO: understand where instabilities come from and how to avoid them
 class Sampler:
     state: State  # state object
     target_score: callable  # target score function
@@ -71,7 +72,7 @@ class Sampler:
             self.logger.log(to_log)
             self.state.update(self.state.particles, step_size)
             if jnp.isnan(self.state.particles).any():
-                raise ValueError(f"Instability detected at step {step_number}")
+                raise ValueError(f"ERROR: Instability detected at step {step_number}")
 
         return self.state.particles
 
