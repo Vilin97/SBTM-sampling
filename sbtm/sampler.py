@@ -150,7 +150,7 @@ class SBTMSampler(ODESampler):
     debug: bool  # whether to print debug information
     heun: bool  # whether to use Heun's method
 
-    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=AbsoluteLossChange(), mini_batch_size=100, debug=False, heun=False):
+    def __init__(self, particles, target_score, step_sizes, max_steps, logger, score_model, loss, optimizer, gd_stopping_criterion=FixedNumBatches(), mini_batch_size=100, debug=False, heun=False):
         super().__init__(particles, target_score, step_sizes, max_steps, logger)
         self.score_model = score_model
         self.loss = loss
