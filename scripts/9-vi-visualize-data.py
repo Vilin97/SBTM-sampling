@@ -33,7 +33,8 @@ target_distributions = {
                 [2, -6], [2, -2], [2, 2], [2, 6],
                 [6, -6], [6, -2], [6, 2], [6, 6]],
         covariances=[1]*16,
-        weights=[1/16]*16)
+        weights=[1/16]*16),
+    'circle': distribution.Circle(center=[4, 0], radius=1, noise=0.2)
 }
 
 #%%
@@ -132,3 +133,58 @@ for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01
                     plt.close()
                 except:
                     print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
+
+#%%
+"Circle distribution"
+importlib.reload(distribution)
+
+example_name = 'circle'
+annealing_name = 'non-annealed'
+
+# x = np.linspace(0, 8, 100)
+# y = np.linspace(-4, 4, 100)
+# X, Y = np.meshgrid(x, y)
+# positions = np.vstack([X.ravel(), Y.ravel()])
+# xx = positions.T
+# center = jnp.array([4, 0])
+# radius = 1
+# noise = 0.2
+# (jnp.linalg.norm(xx-jnp.array(center), axis=1) - radius).shape
+# jax.scipy.stats.multivariate_normal.logpdf(jnp.linalg.norm(xx-jnp.array(center), axis=1) - radius, 0., noise)
+# target_distributions[example_name].density(xx).shape
+
+
+# data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+# step_size = 0.01
+# max_steps = 1000
+# method_name = 'sde'
+# path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
+# with open(path, 'rb') as f:
+#     log_data = pickle.load(f)
+
+# sample = log_data['logs'][-1]['particles']
+# # sample = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=1000)
+
+# fig, ax = plots.plot_distributions_2d(sample, target_distributions[example_name].density)
+# fig.show()
+
+for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'Circle distribution'):
+    for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'annealing={annealing_name}'):
+        try:
+            data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+            path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
+            with open(path, 'rb') as f:
+                log_data = pickle.load(f)
+            
+            sample = log_data['logs'][-1]['particles']
+
+            fig, ax = plots.plot_distributions_2d(sample, target_distributions[example_name].density)
+            ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+
+            save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
+            plt.savefig(save_path)
+            plt.close()
+        except:
+            print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')

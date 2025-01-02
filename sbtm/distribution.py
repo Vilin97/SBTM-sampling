@@ -51,3 +51,24 @@ class GaussianMixture(Distribution):
         mean = self.means[component_index]
         covariance = self.covariances[component_index]
         return jrandom.multivariate_normal(key, mean, covariance)
+    
+class Circle(Distribution):
+    def __init__(self, center, radius, noise):
+        self.center = jnp.array(center)
+        self.radius = radius
+        self.noise = noise
+        self.dimension = len(center)
+
+    def log_density(self, x):
+        assert x.shape[1] == self.dimension
+        return multivariate_normal.logpdf(jnp.linalg.norm(x-self.center, axis=1) - self.radius, 0., self.noise)
+    
+    def density(self, x):
+        return jnp.exp(self.log_density(x))
+    
+    def sample(self, key, size=1):
+        angles = jrandom.uniform(key, shape=(size,)) * 2 * jnp.pi
+        circle_points = jnp.stack([jnp.cos(angles), jnp.sin(angles)], axis=-1) * self.radius
+        noise = jrandom.normal(key, shape=(size, self.dimension)) * self.noise
+        samples = self.center + circle_points + noise
+        return samples
