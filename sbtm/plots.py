@@ -7,15 +7,18 @@ from jax.scipy.stats import gaussian_kde
 from tqdm import tqdm
 from sbtm import stats
 
-def plot_distributions(initial_particles, transported_particles, density):
-    """Plot the initial and transported particles, and the target density function"""
+def plot_distributions(initial_particles, transported_particles, density, lims=None):
+    """Plot the initial and transported particles, and the target density function, in 1D"""
     fig, ax = plt.subplots(figsize=(10, 6))
-    x = np.linspace(min(initial_particles + transported_particles) - 1, 
-                    max(initial_particles + transported_particles) + 1, 1000)
+    if lims:
+        x = np.linspace(lims[0], lims[1], 1000)
+        transported_particles = transported_particles[jnp.logical_and(transported_particles >= lims[0], transported_particles <= lims[1])]
+    else:
+        x = np.linspace(min(initial_particles + transported_particles) - 1, max(initial_particles + transported_particles) + 1, 1000)
+
 
     # Plot initial particles
-    ax.hist(initial_particles, bins=30, density=True, alpha=0.4, color='b',
-            histtype='bar', label='Initial Particles')
+    ax.hist(initial_particles, bins=30, density=True, alpha=0.4, color='b', histtype='bar', label='Initial Particles')
     kde_initial = gaussian_kde(initial_particles.T)(jnp.reshape(x, (1, -1)))
     ax.plot(x, kde_initial, 'b-', lw=2, label='Initial KDE')
 
@@ -26,7 +29,7 @@ def plot_distributions(initial_particles, transported_particles, density):
     ax.plot(x, kde_transported, 'g-', lw=2, label='Transported KDE')
 
     # Plot the target density function
-    y = density(x)
+    y = density(jnp.reshape(x, (-1, 1))) # reshape to (n, 1) for broadcasting
     ax.plot(x, y, 'r-', lw=2, label='Target Distribution')
 
     ax.set_xlabel('Particle Value', fontsize=20)
@@ -41,10 +44,10 @@ def plot_distributions_2d(transported_particles, density, lims=None):
     fig, ax = plt.subplots(figsize=(10, 6))
     
     # Create a grid of points
-    x_min = min(min(transported_particles[:, 0]), lims[0][0]) if lims else min(transported_particles[:, 0])
-    x_max = max(max(transported_particles[:, 0]), lims[0][1]) if lims else max(transported_particles[:, 0])
-    y_min = min(min(transported_particles[:, 1]), lims[1][0]) if lims else min(transported_particles[:, 1])
-    y_max = max(max(transported_particles[:, 1]), lims[1][1]) if lims else max(transported_particles[:, 1])
+    x_min = lims[0][0] if lims else min(transported_particles[:, 0])
+    x_max = lims[0][1] if lims else max(transported_particles[:, 0])
+    y_min = lims[1][0] if lims else min(transported_particles[:, 1])
+    y_max = lims[1][1] if lims else max(transported_particles[:, 1])
     
     x = np.linspace(x_min - 1, x_max + 1, 100)
     y = np.linspace(y_min - 1, y_max + 1, 100)
@@ -55,7 +58,7 @@ def plot_distributions_2d(transported_particles, density, lims=None):
     Z = density(positions.T).reshape(X.shape)
     
     # Plot the density as a heatmap
-    ax.imshow(Z, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', cmap='viridis', alpha=0.4)
+    ax.imshow(Z, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', cmap='viridis')
     
     # Scatterplot the transported particles
     ax.scatter(transported_particles[:, 0], transported_particles[:, 1], c='r', s=1, label='Transported Particles')
@@ -64,7 +67,6 @@ def plot_distributions_2d(transported_particles, density, lims=None):
         ax.set_xlim(lims[0])
         ax.set_ylim(lims[1])
     
-    ax.legend(fontsize=16)
     ax.tick_params(axis='both', which='major', labelsize=12)
     
     return fig, ax

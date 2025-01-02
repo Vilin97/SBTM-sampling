@@ -30,8 +30,9 @@ class Distribution:
 
 class GaussianMixture(Distribution):
     def __init__(self, means, covariances, weights):
-        self.means = jnp.array([jnp.array(mean, ndmin=1) for mean in means])
-        self.covariances = covariances
+        self.means = [jnp.array(mean, ndmin=1) for mean in means]
+        self.dimension = len(self.means[0])
+        self.covariances = [jnp.eye(self.dimension) * covariance for covariance in covariances]
         self.weights = jnp.array(weights)
         self.num_components = len(weights)
 
