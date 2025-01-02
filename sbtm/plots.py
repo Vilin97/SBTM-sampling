@@ -36,6 +36,39 @@ def plot_distributions(initial_particles, transported_particles, density):
 
     return fig, ax
 
+def plot_distributions_2d(transported_particles, density, lims=None):
+    """Plot the 2D density and scatterplot the transported particles"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Create a grid of points
+    x_min = min(min(transported_particles[:, 0]), lims[0][0]) if lims else min(transported_particles[:, 0])
+    x_max = max(max(transported_particles[:, 0]), lims[0][1]) if lims else max(transported_particles[:, 0])
+    y_min = min(min(transported_particles[:, 1]), lims[1][0]) if lims else min(transported_particles[:, 1])
+    y_max = max(max(transported_particles[:, 1]), lims[1][1]) if lims else max(transported_particles[:, 1])
+    
+    x = np.linspace(x_min - 1, x_max + 1, 100)
+    y = np.linspace(y_min - 1, y_max + 1, 100)
+    X, Y = np.meshgrid(x, y)
+    positions = np.vstack([X.ravel(), Y.ravel()])
+    
+    # Evaluate the density on the grid
+    Z = density(positions.T).reshape(X.shape)
+    
+    # Plot the density as a heatmap
+    ax.imshow(Z, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', cmap='viridis', alpha=0.4)
+    
+    # Scatterplot the transported particles
+    ax.scatter(transported_particles[:, 0], transported_particles[:, 1], c='r', s=1, label='Transported Particles')
+    
+    if lims is not None:
+        ax.set_xlim(lims[0])
+        ax.set_ylim(lims[1])
+    
+    ax.legend(fontsize=16)
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    
+    return fig, ax
+
 def visualize_trajectories(particles, particle_idxs = [0,1,2,3,4], max_time=None, title=None):
     """Make a heatmap of particles over time and overlay trajectories of a few particles"""
     def kde(x_values, particles):

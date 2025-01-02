@@ -17,7 +17,7 @@ class Distribution:
         return self.density(x)
 
     def score(self, x):
-        """Compute the score (gradient of log density)."""
+        """Compute the score (gradient of log_density)."""
         return grad(self.log_density)(x)
 
     def density(self, x):
@@ -31,7 +31,7 @@ class Distribution:
 class GaussianMixture(Distribution):
     def __init__(self, means, covariances, weights):
         self.means = jnp.array([jnp.array(mean, ndmin=1) for mean in means])
-        self.covariances = jnp.array([jnp.array(covariance, ndmin=2) for covariance in covariances])
+        self.covariances = covariances
         self.weights = jnp.array(weights)
         self.num_components = len(weights)
 
