@@ -2,24 +2,26 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.stats import gaussian_kde
 from tqdm import tqdm
+from flax import nnx
 
+@nnx.jit(static_argnames='g')
 def kl_divergence(sample_f, g):
     """∫ log(f/g) df ≈ 1/n ∑ᵢ log(f(xᵢ) / g(xᵢ)) where f is estimated with KDE"""
     f_kde = gaussian_kde(sample_f.T)
-    return jnp.clip(jnp.mean(jnp.log(f_kde(sample_f.T) / g(sample_f))), a_min=0, a_max=None)
-
+    return jnp.clip(jnp.mean(jnp.log(f_kde(sample_f.T) / g(sample_f))), a_min=0, a_max=1000)
 
 def compute_kl_divergences(particles, target_density):
     """Compute the KL divergence between the particles and the target density, every k steps"""
 
     kl_divergences = []
-    for i, particles_i in enumerate(tqdm(particles, desc="Computing KL divergence")):
+    for i, particles_i in enumerate(particles):
         kl_div = kl_divergence(particles_i, target_density)
-        if kl_div == jnp.inf:
-            kl_div = kl_divergences[-1]
         kl_divergences.append(kl_div)
 
     return kl_divergences
+
+def time_derivative(quantity, step_size):
+    return jnp.diff(jnp.array(quantity)) / step_size
 
 def compute_score(sample_f):
     """Use kde to estimate the score at each particle location"""
@@ -42,7 +44,7 @@ def compute_fisher_divergences(particles, scores, target_score):
     """
     
     fisher_divs = []
-    for particles_i, scores_i in tqdm(list(zip(particles, scores)), desc="Computing Fisher divergence"):
+    for particles_i, scores_i in list(zip(particles, scores)):
         value = jnp.mean(jax.vmap(square_norm_diff)(scores_i, target_score(particles_i)))
         fisher_divs.append(value)
 

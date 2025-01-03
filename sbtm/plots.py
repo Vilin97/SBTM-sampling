@@ -49,8 +49,8 @@ def plot_distributions_2d(transported_particles, density, lims=None):
     y_min = lims[1][0] if lims else min(transported_particles[:, 1])
     y_max = lims[1][1] if lims else max(transported_particles[:, 1])
     
-    x = np.linspace(x_min - 1, x_max + 1, 100)
-    y = np.linspace(y_min - 1, y_max + 1, 100)
+    x = np.linspace(x_min - 1, x_max + 1, 300)
+    y = np.linspace(y_min - 1, y_max + 1, 300)
     X, Y = np.meshgrid(x, y)
     positions = np.vstack([X.ravel(), Y.ravel()])
     
@@ -71,47 +71,48 @@ def plot_distributions_2d(transported_particles, density, lims=None):
     
     return fig, ax
 
-def visualize_trajectories(particles, particle_idxs = [0,1,2,3,4], max_time=None, title=None):
+def visualize_trajectories(particles, particle_idxs=[0, 1, 2, 3, 4], max_time=None, title=None):
     """Make a heatmap of particles over time and overlay trajectories of a few particles"""
     def kde(x_values, particles):
         density_values = []
-        for particles_i in tqdm([particles_i[:,0] for particles_i in particles], desc="Computing KDE"):
+        for particles_i in [particles_i[:, 0] for particles_i in particles]:
             kde = gaussian_kde(particles_i)
             density_values.append(kde(x_values))
         return density_values
 
-    def plot_density_evolution(x_values, density_values, title, trajectories):
+    def plot_density_evolution(ax, x_values, density_values, title, trajectories):
         assert len(x_values) == len(density_values[0])
         xmin, xmax = x_values[0], x_values[-1]
         num_x_values = len(x_values)
         num_iterations = len(density_values)
         
-        plt.figure(figsize=(12, 6))
-        sns.heatmap(jnp.array(density_values).T)
-        plt.yticks(ticks=jnp.linspace(0, num_x_values, 9), labels=[f'{int(x)}' for x in jnp.linspace(xmin, xmax, 9)], rotation=0)
+        sns.heatmap(jnp.array(density_values).T, ax=ax)
+        ax.set_yticks(jnp.linspace(0, num_x_values, 9))
+        ax.set_yticklabels([f'{int(x)}' for x in jnp.linspace(xmin, xmax, 9)], rotation=0)
         if max_time is not None:
-            plt.xticks(ticks=jnp.linspace(0, num_iterations, 9), 
-                   labels=jnp.linspace(0, num_iterations, 9) * max_time / num_iterations, 
-                   rotation=0)
-            plt.xlabel('Time')
+            ax.set_xticks(jnp.linspace(0, num_iterations, 9))
+            ax.set_xticklabels(jnp.linspace(0, num_iterations, 9) * max_time / num_iterations, rotation=0)
+            ax.set_xlabel('Time')
         else:
-            plt.xticks(ticks=jnp.linspace(0, num_iterations, 9), 
-                   labels=[f'{int(x)}' for x in jnp.linspace(0, num_iterations, 9)], 
-                   rotation=0)
-            plt.xlabel('Iteration')
-        plt.title(title)
+            ax.set_xticks(jnp.linspace(0, num_iterations, 9))
+            ax.set_xticklabels([f'{int(x)}' for x in jnp.linspace(0, num_iterations, 9)], rotation=0)
+            ax.set_xlabel('Iteration')
+        ax.set_title(title)
         
         for trajectory in trajectories:
             trajectory_mapped = [jnp.argmin(jnp.abs(x_values - value)) for value in trajectory]
-            plt.plot(jnp.linspace(0, len(density_values), len(trajectory)), trajectory_mapped, color='white', marker='o', markersize=2)
-        plt.show()
+            ax.plot(jnp.linspace(0, len(density_values), len(trajectory)), trajectory_mapped, color='white', marker='o', markersize=2)
     
     x_values = jnp.linspace(-10, 10, 200)
     sde_kde = kde(x_values, particles)
-    trajectories = [[particles_i[j,0] for particles_i in particles] for j in particle_idxs]
-    plot_density_evolution(x_values, sde_kde, title, trajectories)
+    trajectories = [[particles_i[j, 0] for particles_i in particles] for j in particle_idxs]
     
-def plot_quantity_over_time(ax, quantity, label, yscale='linear', plot_zero_line=True, max_time=None, **kwargs):
+    fig, ax = plt.subplots(figsize=(12, 6))
+    plot_density_evolution(ax, x_values, sde_kde, title, trajectories)
+    
+    return fig, ax
+    
+def plot_quantity_over_time(ax, quantity, label, yscale='linear', plot_zero_line=False, max_time=None, **kwargs):
     """Plot an arbitrary quantity over time"""
     ax.plot(quantity, label=label, **kwargs)
     if yscale == 'linear' and plot_zero_line:
@@ -120,7 +121,7 @@ def plot_quantity_over_time(ax, quantity, label, yscale='linear', plot_zero_line
     ax.legend()
     if max_time is not None:
         ax.set_xticks(np.linspace(0, len(quantity) - 1, 9))
-        ax.set_xticklabels(np.linspace(0, max_time, 9))
+        ax.set_xticklabels([str(np.round(x, 5)) for x in np.linspace(0, max_time, 9)])
         ax.set_xlabel('Time')
     else:
         ax.set_xlabel('Step')
@@ -148,6 +149,21 @@ def plot_fisher_divergence(particles, target_score, scores=None, **kwargs):
     plt.title('Fisher Divergence Estimate')
     plt.show()
 
+def plot_kl_divergence_decay_rate(ax, particles_list, names, target_density, step_size, smoothing=0.5, plot_every_n=1):
+    max_time = len(particles_list[0]) * step_size
+
+    for (particles, name) in zip(particles_list, names):
+        kl_div_time_derivative = stats.compute_kl_divergence_time_derivative(particles, target_density, step_size)
+        plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative[::plot_every_n], smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, {name}', marker='o', markersize=3, max_time=max_time)
+    return ax
+
+def plot_relative_fisher_info_estimates(ax, particles_list, scores_list, names, target_score, smoothing=0.5, plot_every_n=1):
+    for (particles, scores, name) in zip(particles_list, scores_list, names):
+        fisher_divs = stats.compute_fisher_divergences(particles, scores, target_score)
+        plot_quantity_over_time(ax, stats.ema(fisher_divs[::plot_every_n], smoothing), label=rf'Fisher Info, {name}', marker='o', markersize=3)
+        ax.set_ylabel(r'$\frac{1}{n} \sum_{i} ||\nabla \log f_t(x_{i}) - \nabla \log \pi(x_{i})||^2$')
+    return ax
+    
 ### SBTM ###
 def plot_losses(loss_values, batch_loss_values, **kwargs):
     """Plot training loss of the score model in SBTM"""

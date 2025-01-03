@@ -1,7 +1,13 @@
-from jax import grad
+import jax
+from jax import grad, vmap
 from jax.scipy.stats import multivariate_normal
 import jax.random as jrandom
 import jax.numpy as jnp
+from flax import nnx
+
+@nnx.jit(static_argnames='log_density')
+def score_log_density(log_density, x):
+    return vmap(grad(log_density))(x)
 
 class Distribution:
     def __init__(self):
@@ -18,7 +24,7 @@ class Distribution:
 
     def score(self, x):
         """Compute the score (gradient of log_density)."""
-        return grad(self.log_density)(x)
+        return score_log_density(self.log_density, x)
 
     def density(self, x):
         """Compute the density of the distribution at x."""
@@ -51,6 +57,20 @@ class GaussianMixture(Distribution):
         mean = self.means[component_index]
         covariance = self.covariances[component_index]
         return jrandom.multivariate_normal(key, mean, covariance)
+    
+class Gausssian(Distribution):
+    def __init__(self, mean, covariance):
+        self.mean = jnp.array(mean)
+        self.covariance = jnp.array(covariance)
+
+    def log_density(self, x):
+        return multivariate_normal.logpdf(x, self.mean, self.covariance)
+
+    def density(self, x):
+        return multivariate_normal.pdf(x, self.mean, self.covariance)
+
+    def sample(self, key, size=1):
+        return jrandom.multivariate_normal(key, self.mean, self.covariance, shape=(size,))
     
 class Circle(Distribution):
     def __init__(self, center, radius, noise):

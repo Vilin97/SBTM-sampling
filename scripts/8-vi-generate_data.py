@@ -5,13 +5,14 @@ import numpy as np
 from scipy.stats import norm
 from scipy.integrate import quad
 import matplotlib.pyplot as plt
+from jax.scipy.stats import multivariate_normal
 
 import jax
 import importlib
 import numpy as np
 import jax.numpy as jnp
 import jax.random as jrandom
-from sbtm import density, plots, kernel, losses, models, sampler, stats
+from sbtm import density, plots, kernel, losses, models, sampler, stats, distribution
 from flax import nnx
 import optax
 import matplotlib.pyplot as plt
@@ -21,10 +22,11 @@ import pickle
 import os
 
 # reload modules
-for module in [density, plots, kernel, losses, models, sampler, stats]:
+for module in [density, plots, kernel, losses, models, sampler, stats, distribution]:
     importlib.reload(module)
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.45'
 
 #%%
 def λ(t, t_end):
@@ -93,48 +95,49 @@ def train_and_save_model(d):
     models.save_model(score_model, path)
 
 #%%
-# """Mixture of gaussians"""
-# # Initial sample
-# importlib.reload(sampler)
-# num_particles = 1000
-# key = jrandom.key(47)
+"""Mixture of gaussians"""
+# Initial sample
+importlib.reload(sampler)
+num_particles = 1000
+key = jrandom.key(47)
 
-# prior_sample = jrandom.multivariate_normal(key, jnp.array([0]), jnp.array([[1.]]), shape=(num_particles,))
-# prior_density = lambda x: jax.scipy.stats.multivariate_normal.pdf(x, 0, 1)
-# prior_score = lambda x: density.score(prior_density, x)
+prior_dist = distribution.Gausssian(jnp.array([0]), jnp.array([[1]]))
+prior_sample = prior_dist.sample(key, size=num_particles)
+prior_density = prior_dist.density
+prior_score = prior_dist.score
 
-# # target setup
-# target_density_far = lambda x: 0.25 * jax.scipy.stats.multivariate_normal.pdf(x, -4, 1) + 0.75 * jax.scipy.stats.multivariate_normal.pdf(x, 4, 1)
-# target_density_near = lambda x: 0.25 * jax.scipy.stats.multivariate_normal.pdf(x, -2, 1) + 0.75 * jax.scipy.stats.multivariate_normal.pdf(x, 2, 1)
+# target setup
+target_dist_far = distribution.GaussianMixture(means=[-4, 4], covariances=[1, 1], weights=[0.25, 0.75])
+target_dist_near = distribution.GaussianMixture(means=[-2, 2], covariances=[1, 1], weights=[0.25, 0.75])
 
-# # sample
-# for (target_density, example_name) in [(target_density_far, 'gaussians_far'), (target_density_near, 'gaussians_near')]:
-#     print(f"{example_name}")
-#     target_score = lambda x: density.score(target_density, x)
+# sample
+for (target_dist, example_name) in tqdm([(target_dist_far, 'gaussians_far'), (target_dist_near, 'gaussians_near')], desc='Mixture of gaussians'):
+    # print(f"{example_name}")
+    target_score = target_dist.score
 
-#     for (step_size, max_steps) in [(0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)]:
-#         print(f"    Step size={step_size}, Max steps={max_steps}, t_end={step_size * max_steps}")
-#         t_end = step_size * max_steps
+    for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)], desc=f"{example_name}", leave=False):
+        # print(f"    Step size={step_size}, Max steps={max_steps}, t_end={step_size * max_steps}")
+        t_end = step_size * max_steps
         
-#         geometric_annealed_score = lambda t,x : geometric_mean_score(λ(t, t_end), x, prior_score, target_score)
-#         dilation_annealed_score = lambda t,x : dilation_score(λ(t, t_end), x, target_score)
-#         non_annealed_score = lambda t,x : target_score(x)
+        geometric_annealed_score = lambda t,x : geometric_mean_score(λ(t, t_end), x, prior_score, target_score)
+        dilation_annealed_score = lambda t,x : dilation_score(λ(t, t_end), x, target_score)
+        non_annealed_score = lambda t,x : target_score(x)
         
-#         for (annealed_score, annealing_name) in [(geometric_annealed_score, 'geometric'), (dilation_annealed_score, 'dilation'), (non_annealed_score, 'non-annealed')]:
-#             for (run_func, method_name) in [(run_sbtm, 'sbtm'), (run_sde, 'sde')]:
-#                 try:
-#                     print(f"        {method_name} with {annealing_name}")
-#                     logger = run_func(prior_sample, annealed_score, step_size, max_steps)
-#                     log_data = {
-#                         'logs': logger.logs,
-#                         'hyperparameters': logger.hyperparameters
-#                     }
-#                     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
-#                     os.makedirs(data_dir, exist_ok=True)
-#                     with open(os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl'), 'wb') as f:
-#                         pickle.dump(log_data, f)
-#                 except Exception as e:
-#                     print(e)
+        for (annealed_score, annealing_name) in tqdm([(geometric_annealed_score, 'geometric'), (dilation_annealed_score, 'dilation'), (non_annealed_score, 'non-annealed')], desc=f"{step_size} * {max_steps}", leave=False):
+            for (run_func, method_name) in tqdm([(run_sbtm, 'sbtm'), (run_sde, 'sde')], desc=f"{annealing_name}", leave=False):
+                try:
+                    print(f"{method_name}")
+                    logger = run_func(prior_sample, annealed_score, step_size, max_steps)
+                    log_data = {
+                        'logs': logger.logs,
+                        'hyperparameters': logger.hyperparameters
+                    }
+                    data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+                    os.makedirs(data_dir, exist_ok=True)
+                    with open(os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl'), 'wb') as f:
+                        pickle.dump(log_data, f)
+                except Exception as e:
+                    print(e)
 
 # #%%
 # """Analytic solution"""
@@ -231,47 +234,47 @@ def train_and_save_model(d):
 #                 print(e)
 
 #%%
-"""circle distribution"""
-num_particles = 10000
-key = jrandom.key(47)
-d = 2
+# """circle distribution"""
+# num_particles = 10000
+# key = jrandom.key(47)
+# d = 2
 
-# prior
-prior_sample = jrandom.multivariate_normal(key, jnp.zeros(d), jnp.eye(d), shape=(num_particles, ))
-prior_density = lambda x: jax.scipy.stats.multivariate_normal.pdf(x, jnp.zeros(d), jnp.eye(d))
-prior_score = lambda x: -x
+# # prior
+# prior_sample = jrandom.multivariate_normal(key, jnp.zeros(d), jnp.eye(d), shape=(num_particles, ))
+# prior_density = lambda x: jax.scipy.stats.multivariate_normal.pdf(x, jnp.zeros(d), jnp.eye(d))
+# prior_score = lambda x: -x
 
-# target
-def target_density(x):
-    assert x.shape[0] == d
-    return jax.scipy.stats.multivariate_normal.pdf(jnp.linalg.norm(x-jnp.array([4., 0.])) - 1., 0., 0.2)
-def target_log_density(x):
-    assert x.shape[0] == d
-    return jax.scipy.stats.multivariate_normal.logpdf(jnp.linalg.norm(x-jnp.array([4., 0.])) - 1., 0., 0.2)
-target_score = jax.jit(lambda x: density.score_log_density(target_log_density, x))
+# # target
+# def target_density(x):
+#     assert x.shape[0] == d
+#     return jax.scipy.stats.multivariate_normal.pdf(jnp.linalg.norm(x-jnp.array([4., 0.])) - 1., 0., 0.2)
+# def target_log_density(x):
+#     assert x.shape[0] == d
+#     return jax.scipy.stats.multivariate_normal.logpdf(jnp.linalg.norm(x-jnp.array([4., 0.])) - 1., 0., 0.2)
+# target_score = jax.jit(lambda x: density.score_log_density(target_log_density, x))
 
-# sample
-example_name = 'circle'
-print(f"{example_name}")
-for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)]):
-    t_end = step_size * max_steps
+# # sample
+# example_name = 'circle'
+# print(f"{example_name}")
+# for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)]):
+#     t_end = step_size * max_steps
     
-    method_name = 'sbtm'
-    try:
-        print(f"Step size={step_size}, Max steps={max_steps}, {method_name}")
-        score_model = models.ResNet(models.MLP(d=d, hidden_units=[128, 128, 128, 128]))
-        score_model = models.load_model(score_model, os.path.expanduser(f'~/SBTM-sampling/data/models/standard_gaussian/d_2/hidden_128_128_128_128'))
-        logger = sampler.Logger()
-        sampler.SBTMSampler(prior_sample, target_score, step_size, max_steps, logger, score_model, losses.implicit_score_matching_loss, optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))).sample()
-        save_logs(logger, example_name, method_name, 'non-annealed', step_size, max_steps)
-    except Exception as e:
-        print(e)
+#     method_name = 'sbtm'
+#     try:
+#         print(f"Step size={step_size}, Max steps={max_steps}, {method_name}")
+#         score_model = models.ResNet(models.MLP(d=d, hidden_units=[128, 128, 128, 128]))
+#         score_model = models.load_model(score_model, os.path.expanduser(f'~/SBTM-sampling/data/models/standard_gaussian/d_2/hidden_128_128_128_128'))
+#         logger = sampler.Logger()
+#         sampler.SBTMSampler(prior_sample, target_score, step_size, max_steps, logger, score_model, losses.implicit_score_matching_loss, optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))).sample()
+#         save_logs(logger, example_name, method_name, 'non-annealed', step_size, max_steps)
+#     except Exception as e:
+#         print(e)
 
-    method_name = 'sde'
-    try:
-        print(f"Step size={step_size}, Max steps={max_steps}, {method_name}")
-        logger = sampler.Logger()
-        sampler.SDESampler(prior_sample, target_score, step_size, max_steps, logger).sample()
-        save_logs(logger, example_name, method_name, 'non-annealed', step_size, max_steps)
-    except Exception as e:
-        print(e)
+#     method_name = 'sde'
+#     try:
+#         print(f"Step size={step_size}, Max steps={max_steps}, {method_name}")
+#         logger = sampler.Logger()
+#         sampler.SDESampler(prior_sample, target_score, step_size, max_steps, logger).sample()
+#         save_logs(logger, example_name, method_name, 'non-annealed', step_size, max_steps)
+#     except Exception as e:
+#         print(e)
