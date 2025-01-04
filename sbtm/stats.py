@@ -4,21 +4,18 @@ from jax.scipy.stats import gaussian_kde
 from tqdm import tqdm
 from flax import nnx
 
-@nnx.jit(static_argnames='g')
-def kl_divergence(sample_f, g):
-    """∫ log(f/g) df ≈ 1/n ∑ᵢ log(f(xᵢ) / g(xᵢ)) where f is estimated with KDE"""
+@nnx.jit(static_argnames='log_g')
+def kl_divergence_log_density(sample_f, log_g):
+    """∫ log(f/g) df ≈ 1/n ∑ᵢ log(f(xᵢ)) - log(g(xᵢ)) where f is estimated with KDE"""
     f_kde = gaussian_kde(sample_f.T)
-    return jnp.clip(jnp.mean(jnp.log(f_kde(sample_f.T) / g(sample_f))), a_min=0, a_max=1000)
+    return jnp.mean(jnp.log(f_kde(sample_f.T)) - log_g(sample_f))
 
-def compute_kl_divergences(particles, target_density):
-    """Compute the KL divergence between the particles and the target density, every k steps"""
+def kl_divergence(sample_f, g):
+    log_g = lambda x: jnp.log(g(x))[0]
+    return kl_divergence_log_density(sample_f, log_g)
 
-    kl_divergences = []
-    for i, particles_i in enumerate(particles):
-        kl_div = kl_divergence(particles_i, target_density)
-        kl_divergences.append(kl_div)
-
-    return kl_divergences
+def compute_kl_divergences(particles, log_density):
+    return [kl_divergence_log_density(particles_i, log_density) for particles_i in particles]
 
 def time_derivative(quantity, step_size):
     return jnp.diff(jnp.array(quantity)) / step_size

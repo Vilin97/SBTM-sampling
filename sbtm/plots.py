@@ -39,33 +39,28 @@ def plot_distributions(initial_particles, transported_particles, density, lims=N
 
     return fig, ax
 
-def plot_distributions_2d(transported_particles, density, lims=None):
+def plot_distributions_2d(particles, density, lims=None, resolution=300, num_scatter=10000):
     """Plot the 2D density and scatterplot the transported particles"""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    if lims is None:
+        lims = [
+            [particles[:, 0].min()-1, particles[:, 0].max()+1],
+            [particles[:, 1].min()-1, particles[:, 1].max()+1]
+        ]
     
     # Create a grid of points
-    x_min = lims[0][0] if lims else min(transported_particles[:, 0])
-    x_max = lims[0][1] if lims else max(transported_particles[:, 0])
-    y_min = lims[1][0] if lims else min(transported_particles[:, 1])
-    y_max = lims[1][1] if lims else max(transported_particles[:, 1])
-    
-    x = np.linspace(x_min - 1, x_max + 1, 300)
-    y = np.linspace(y_min - 1, y_max + 1, 300)
+    x = np.linspace(lims[0][0], lims[0][1], resolution)
+    y = np.linspace(lims[1][0], lims[1][1], resolution)
     X, Y = np.meshgrid(x, y)
     positions = np.vstack([X.ravel(), Y.ravel()])
     
-    # Evaluate the density on the grid
     Z = density(positions.T).reshape(X.shape)
     
-    # Plot the density as a heatmap
     ax.imshow(Z, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', cmap='viridis')
     
-    # Scatterplot the transported particles
-    ax.scatter(transported_particles[:, 0], transported_particles[:, 1], c='r', s=1, label='Transported Particles')
-    
-    if lims is not None:
-        ax.set_xlim(lims[0])
-        ax.set_ylim(lims[1])
+    scatter_particles = particles if particles.shape[0] <= num_scatter else particles[np.random.choice(particles.shape[0], num_scatter, replace=False)]
+    ax.scatter(scatter_particles[:, 0], scatter_particles[:, 1], c='r', s=1, label='Transported Particles')
     
     ax.tick_params(axis='both', which='major', labelsize=12)
     

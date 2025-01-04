@@ -80,8 +80,8 @@ class Circle(Distribution):
         self.dimension = len(center)
 
     def log_density(self, x):
-        assert x.shape[1] == self.dimension
-        return multivariate_normal.logpdf(jnp.linalg.norm(x-self.center, axis=1) - self.radius, 0., self.noise)
+        assert x.shape[-1] == self.dimension
+        return multivariate_normal.logpdf(jnp.linalg.norm(x - self.center, axis=len(x.shape)-1) - self.radius, 0., self.noise)
     
     def density(self, x):
         return jnp.exp(self.log_density(x))

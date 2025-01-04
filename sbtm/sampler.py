@@ -62,7 +62,7 @@ class Sampler:
 
     def sample(self):
         """Sample from the target distribution"""
-        for step_number in tqdm(range(self.max_steps), desc="Sampling"):
+        for step_number in tqdm(range(self.max_steps), desc="Sampling", leave=False):
             if step_number == self.max_steps or self.state.t >= self.t_end:
                 break
             step_size = self.step_size(step_number)

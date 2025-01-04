@@ -98,7 +98,7 @@ def train_and_save_model(d):
 """Mixture of gaussians"""
 # Initial sample
 importlib.reload(sampler)
-num_particles = 1000
+num_particles = 10000
 key = jrandom.key(47)
 
 prior_dist = distribution.Gausssian(jnp.array([0]), jnp.array([[1]]))
@@ -115,7 +115,8 @@ for (target_dist, example_name) in tqdm([(target_dist_far, 'gaussians_far'), (ta
     # print(f"{example_name}")
     target_score = target_dist.score
 
-    for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)], desc=f"{example_name}", leave=False):
+    # for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)], desc=f"{example_name}", leave=False):
+    for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.1, 100), (0.1, 1000)], desc=f"{example_name}", leave=False):
         # print(f"    Step size={step_size}, Max steps={max_steps}, t_end={step_size * max_steps}")
         t_end = step_size * max_steps
         
@@ -134,7 +135,7 @@ for (target_dist, example_name) in tqdm([(target_dist_far, 'gaussians_far'), (ta
                     }
                     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
                     os.makedirs(data_dir, exist_ok=True)
-                    with open(os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl'), 'wb') as f:
+                    with open(os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_{num_particles}.pkl'), 'wb') as f:
                         pickle.dump(log_data, f)
                 except Exception as e:
                     print(e)
@@ -148,27 +149,27 @@ for (target_dist, example_name) in tqdm([(target_dist_far, 'gaussians_far'), (ta
 #     return 1 - jnp.exp(-2*t)
 
 # t0 = 0.1
-# num_particles = 1000
+# num_particles = 10000
 # key = jrandom.key(47)
 
-# prior_sample = jrandom.multivariate_normal(key, jnp.array([0]), jnp.array([[K(t0)]]), shape=(num_particles,))
-# prior_density = lambda x: jax.scipy.stats.multivariate_normal.pdf(x, 0, K(t0))
-# prior_score = lambda x: density.score(prior_density, x)
+# prior_dist = distribution.Gausssian(jnp.array([0]), jnp.array([[K(t0)]]))
+# prior_sample = prior_dist.sample(key, size=num_particles)
+# prior_density = prior_dist.density
+# prior_score = prior_dist.score
 
-# # target setup
-# target_density = lambda x: jax.scipy.stats.multivariate_normal.pdf(x, 0, 1)
-# target_score = lambda x: density.score(target_density, x)
-
+# target_dist = distribution.Gausssian(jnp.array([0]), jnp.array([[1]]))
+# target_density = target_dist.density
+# target_score = target_dist.score
 
 # # sample
 # example_name = 'analytic'
 # print('analytic')
-# for (step_size, max_steps) in [(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)]:
-#     print(f"Step size={step_size}, Max steps={max_steps}, t_end={step_size * max_steps}")
+# for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc='Analytic'):
+#     # print(f"Step size={step_size}, Max steps={max_steps}, t_end={step_size * max_steps}")
     
-#     for (run_func, method_name) in [(run_sbtm, 'sbtm'), (run_sde, 'sde')]:
+#     for (run_func, method_name) in tqdm([(run_sbtm, 'sbtm'), (run_sde, 'sde')], desc=f'{step_size} * {max_steps}', leave=False):
 #         try:
-#             print(f"    {method_name}")
+#             # print(f"    {method_name}")
 #             logger = run_func(prior_sample, target_score, step_size, max_steps)
 #             log_data = {
 #                 'logs': logger.logs,
@@ -176,7 +177,7 @@ for (target_dist, example_name) in tqdm([(target_dist_far, 'gaussians_far'), (ta
 #             }
 #             data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/non-annealed')
 #             os.makedirs(data_dir, exist_ok=True)
-#             with open(os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl'), 'wb') as f:
+#             with open(os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_{num_particles}.pkl'), 'wb') as f:
 #                 pickle.dump(log_data, f)
 #         except Exception as e:
 #             print(e)
@@ -256,7 +257,7 @@ for (target_dist, example_name) in tqdm([(target_dist_far, 'gaussians_far'), (ta
 # # sample
 # example_name = 'circle'
 # print(f"{example_name}")
-# for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)]):
+# for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.1, 10), (0.1, 100), (0.1, 1000)]):
 #     t_end = step_size * max_steps
     
 #     method_name = 'sbtm'
