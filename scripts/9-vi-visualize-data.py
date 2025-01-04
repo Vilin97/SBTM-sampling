@@ -85,58 +85,6 @@ def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, sm
     return fig, ax
 
 #%%
-# importlib.reload(stats)
-# example_name = 'analytic'
-# step_size = 0.002
-# max_steps = 2500
-
-# example_name = 'gaussians_near_2d'
-# step_size = 0.01
-# max_steps = 1000
-# target_dist = target_distributions[example_name]
-# plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, save=False)[0].show()
-
-# target_dist = target_distributions[example_name]
-
-# smoothing = 0.5
-# annealing_name = 'non-annealed'
-# data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sbtm/{annealing_name}')
-# path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
-# with open(path, 'rb') as f:
-#     log_data = pickle.load(f)
-# sbtm_particles = jnp.array([log['particles'] for log in log_data['logs']])
-# sbtm_scores = jnp.array([log['score'] for log in log_data['logs']])
-
-# data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sde/{annealing_name}')
-# path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
-# with open(path, 'rb') as f:
-#     log_data = pickle.load(f)
-# sde_particles = jnp.array([log['particles'] for log in log_data['logs']])
-
-# fig, ax = plt.subplots(figsize=(10, 6))
-# T = max_steps*step_size
-
-# # relative entropy dissipation
-# print('Computing relative entropy dissipation')
-# kl_div_time_derivative_sbtm = -stats.time_derivative(stats.compute_kl_divergences(sde_particles, target_dist.log_density), step_size)
-# kl_div_time_derivative_sbtm = jnp.where(jnp.isnan(kl_div_time_derivative_sbtm), jnp.nanmax(kl_div_time_derivative_sbtm), kl_div_time_derivative_sbtm)
-# kl_div_time_derivative_sbtm = jnp.clip(kl_div_time_derivative_sbtm, a_min=1e-5, a_max=1e4)
-# plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sbtm, smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SDE', marker='o', markersize=3, max_time=T)
-
-# kl_div_time_derivative_sde = -stats.time_derivative(stats.compute_kl_divergences(sbtm_particles, target_dist.log_density), step_size)
-# kl_div_time_derivative_sde = jnp.where(jnp.isnan(kl_div_time_derivative_sde), jnp.nanmax(kl_div_time_derivative_sde), kl_div_time_derivative_sde)
-# kl_div_time_derivative_sde = jnp.clip(kl_div_time_derivative_sde, a_min=1e-5, a_max=1e4)
-# plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sde, smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SBTM', marker='o', markersize=3, max_time=T)
-
-# # relative fisher info
-# sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(sbtm_particles, sbtm_scores, target_dist.score))
-# plots.plot_quantity_over_time(ax, stats.ema(sbtm_fisher_divs, smoothing), label=r'$\frac{1}{n}\sum_{i=1}^n\|\nabla \log \pi_t(X_i) - s(X_i)\|^2$, SBTM', max_time=T)
-# ax.set_yscale('log')
-# ax.set_title(f"{example_name} $\Delta t={step_size}$, $T={T}$")
-
-# fig.show()
-
-#%%
 # TODO: make these kinds of plots for each example for illustration
 # importlib.reload(plots)
 # lims = [(-20, 20), (-20, 20)]
@@ -151,176 +99,176 @@ def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, sm
 # plots.plot_distributions_2d(sbtm_particles[max_steps], target_dist.density, lims=lims)[0].show()
 
 #%%
-# entropy dissipation plots
-for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)], desc='1d Gaussian mixtures'):
-    for example_name in tqdm(['gaussians_far', 'gaussians_near'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
-        try:
-            plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-        except Exception as e:
-            print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-        
-plt.close('all')        
+# "entropy dissipation plots"
 
-example_name = 'analytic'
-for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'example={example_name}'):
-    try:
-        plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-    except Exception as e:
-        print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-plt.close('all')
-
-for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'2d Gaussian mixtures'):
-    for example_name in tqdm(['gaussians_far_2d', 'gaussians_near_2d'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
-        try:
-            plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-        except Exception as e:
-            print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-plt.close('all')
-
-example_name = 'circle'
-for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'Circle distribution'):
-    try:
-        plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-    except Exception as e:
-        print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-plt.close('all')
-
-# #%%
-# "1d Gaussian mixtures"
-
-# lims_near = [-8, 8]
-# lims_far = [-10, 10]
 # for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)], desc='1d Gaussian mixtures'):
-#     for (example_name, lims) in tqdm(list(zip(['gaussians_far', 'gaussians_near'], [lims_far, lims_near])), leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
-#         target_samples = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=1000)
-#         kde = gaussian_kde(target_samples.T)
-#         target_dist = target_distributions[example_name]
-#         for annealing_name in tqdm(['geometric', 'dilation', 'non-annealed'], leave=False, desc=f'example={example_name}'):
-#             for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'annealing={annealing_name}'):
-#                 try:
-#                     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
-#                     path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
-#                     with open(path, 'rb') as f:
-#                         log_data = pickle.load(f)
-                        
-#                     all_particles = jnp.array([log['particles'] for log in log_data['logs']])
-
-#                     # initial and final particles
-#                     prior_sample = all_particles[0]
-#                     sample = all_particles[-1]
-                    
-#                     fig, ax = plots.plot_distributions(prior_sample, sample, target_dist.density, lims=lims)
-#                     ax.set_xlim(-10, 10)
-#                     ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
-#                     x = jnp.linspace(-10, 10, 1000)
-#                     ax.plot(x, kde(x), lw=2, label='Target KDE', color='orange')
-#                     ax.legend()
-
-#                     save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
-#                     os.makedirs(save_dir, exist_ok=True)
-#                     save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
-#                     plt.savefig(save_path)
-                    
-#                     # trajectories
-#                     fig, ax = plots.visualize_trajectories(all_particles, particle_idxs = [0,1], max_time=step_size*max_steps, title=f'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
-#                     save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_trajectories.png')
-#                     plt.savefig(save_path)
-                    
-#                     plt.close('all')
-#                 except:
-#                     print(f'\nFailed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
-
-# #%%
-# """1d Analytic solution"""
+#     for example_name in tqdm(['gaussians_far', 'gaussians_near'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
+#         try:
+#             plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
+#         except Exception as e:
+#             print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
+        
+# plt.close('all')        
 
 # example_name = 'analytic'
-# annealing_name = 'non-annealed'
 # for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'example={example_name}'):
-#     target_samples = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=1000)
-#     kde = gaussian_kde(target_samples.T)
-#     if annealing_name == 'non-annealed':
-#         plot_entropy_dissipation(example_name, target_dist, step_size, max_steps)
-#     for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
-#         try:
-#             data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
-#             path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
-#             with open(path, 'rb') as f:
-#                 log_data = pickle.load(f)
-            
-#             prior_sample = log_data['logs'][0]['particles']
-#             sample = log_data['logs'][-1]['particles']
+#     try:
+#         plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
+#     except Exception as e:
+#         print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
+# plt.close('all')
 
-#             fig, ax = plots.plot_distributions(prior_sample, sample, target_distributions[example_name].density)
-#             ax.set_xlim(-10, 10)
-#             ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
-#             x = jnp.linspace(-10, 10, 1000)
-#             ax.plot(x, kde(x), lw=2, label='Target KDE', color='orange')
-#             ax.legend()
-
-#             save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
-#             os.makedirs(save_dir, exist_ok=True)
-#             save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
-#             plt.savefig(save_path)
-#             plt.close()
-#         except:
-#             print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
-            
-# #%%
-# "2d Gaussian mixtures"
-
-# lims_near = [[-8, 8], [-8, 8]]
-# lims_far = [[-20, 20], [-20, 20]]
 # for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'2d Gaussian mixtures'):
-#     for (example_name, lims) in tqdm(list(zip(['gaussians_far_2d', 'gaussians_near_2d'], [lims_far, lims_near])), leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
-#         for annealing_name in tqdm(['geometric', 'dilation', 'non-annealed'], leave=False, desc=f'example={example_name}'):
-#             if annealing_name == 'non-annealed':
-#                 plot_entropy_dissipation(example_name, target_dist, step_size, max_steps)
-#             for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'annealing={annealing_name}'):
-#                 try:
-#                     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
-#                     path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
-#                     with open(path, 'rb') as f:
-#                         log_data = pickle.load(f)
-                    
-#                     sample = log_data['logs'][-1]['particles']
-
-#                     fig, ax = plots.plot_distributions_2d(sample, target_distributions[example_name].density, lims=lims)
-#                     ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
-
-#                     save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
-#                     os.makedirs(save_dir, exist_ok=True)
-#                     save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
-#                     plt.savefig(save_path)
-#                     plt.close()
-#                 except:
-#                     print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
-
-# #%%
-# "Circle distribution"
-# importlib.reload(distribution)
+#     for example_name in tqdm(['gaussians_far_2d', 'gaussians_near_2d'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
+#         try:
+#             plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
+#         except Exception as e:
+#             print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
+# plt.close('all')
 
 # example_name = 'circle'
-# annealing_name = 'non-annealed'
-
 # for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'Circle distribution'):
-#     if annealing_name == 'non-annealed':
-#         plot_entropy_dissipation(example_name, target_dist, step_size, max_steps)
-#     for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'annealing={annealing_name}'):
-#         try:
-#             data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
-#             path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
-#             with open(path, 'rb') as f:
-#                 log_data = pickle.load(f)
+#     try:
+#         plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
+#     except Exception as e:
+#         print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
+# plt.close('all')
+
+#%%
+"1d Gaussian mixtures"
+
+lims_near = [-8, 8]
+lims_far = [-10, 10]
+for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)], desc='1d Gaussian mixtures'):
+    for (example_name, lims) in tqdm(list(zip(['gaussians_far', 'gaussians_near'], [lims_far, lims_near])), leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
+        target_samples = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=1000)
+        kde = gaussian_kde(target_samples.T)
+        target_dist = target_distributions[example_name]
+        for annealing_name in tqdm(['geometric', 'dilation', 'non-annealed'], leave=False, desc=f'example={example_name}'):
+            for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'annealing={annealing_name}'):
+                try:
+                    data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+                    path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
+                    with open(path, 'rb') as f:
+                        log_data = pickle.load(f)
+                        
+                    all_particles = jnp.array([log['particles'] for log in log_data['logs']])
+
+                    # initial and final particles
+                    prior_sample = all_particles[0]
+                    sample = all_particles[-1]
+                    
+                    fig, ax = plots.plot_distributions(prior_sample, sample, target_dist.density, lims=lims)
+                    ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+                    x = jnp.linspace(lims[0], lims[1], 1000)
+                    ax.plot(x, kde(x), lw=2, label='Target KDE', color='orange')
+                    ax.legend()
+
+                    save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
+                    os.makedirs(save_dir, exist_ok=True)
+                    save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
+                    plt.savefig(save_path)
+                    
+                    # trajectories
+                    fig, ax = plots.visualize_trajectories(all_particles, particle_idxs = [0,1], max_time=step_size*max_steps, title=f'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+                    save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_trajectories.png')
+                    plt.savefig(save_path)
+                    
+                    plt.close('all')
+                except:
+                    print(f'\nFailed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
+
+#%%
+"""1d Analytic solution"""
+
+example_name = 'analytic'
+annealing_name = 'non-annealed'
+lims = [-5, 5]
+for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'example={example_name}'):
+    target_samples = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=1000)
+    kde = gaussian_kde(target_samples.T)
+    for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
+        try:
+            data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+            path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
+            with open(path, 'rb') as f:
+                log_data = pickle.load(f)
             
-#             sample = log_data['logs'][-1]['particles']
+            prior_sample = log_data['logs'][0]['particles']
+            sample = log_data['logs'][-1]['particles']
 
-#             fig, ax = plots.plot_distributions_2d(sample, target_distributions[example_name].density)
-#             ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+            fig, ax = plots.plot_distributions(prior_sample, sample, target_distributions[example_name].density, lims=lims)
+            ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+            x = jnp.linspace(lims[0], lims[1], 1000)
+            ax.plot(x, kde(x), lw=2, label='Target KDE', color='orange')
+            ax.legend()
 
-#             save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
-#             os.makedirs(save_dir, exist_ok=True)
-#             save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
-#             plt.savefig(save_path)
-#             plt.close()
-#         except:
-#             print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
+            save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
+            plt.savefig(save_path)
+            
+            # trajectories
+            fig, ax = plots.visualize_trajectories(all_particles, particle_idxs = [0,1], max_time=step_size*max_steps, title=f'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+            save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_trajectories.png')
+            plt.savefig(save_path)
+            
+            plt.close('all')
+        except:
+            print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
+            
+#%%
+"2d Gaussian mixtures"
+
+lims_near = [[-8, 8], [-8, 8]]
+lims_far = [[-20, 20], [-20, 20]]
+for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'2d Gaussian mixtures'):
+    for (example_name, lims) in tqdm(list(zip(['gaussians_far_2d', 'gaussians_near_2d'], [lims_far, lims_near])), leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
+        for annealing_name in tqdm(['geometric', 'dilation', 'non-annealed'], leave=False, desc=f'example={example_name}'):
+            for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'annealing={annealing_name}'):
+                try:
+                    data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+                    path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
+                    with open(path, 'rb') as f:
+                        log_data = pickle.load(f)
+                    
+                    sample = log_data['logs'][-1]['particles']
+
+                    fig, ax = plots.plot_distributions_2d(sample, target_distributions[example_name].density, lims=lims)
+                    ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+
+                    save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
+                    os.makedirs(save_dir, exist_ok=True)
+                    save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
+                    plt.savefig(save_path)
+                    plt.close()
+                except:
+                    print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
+
+#%%
+"Circle distribution"
+importlib.reload(distribution)
+
+example_name = 'circle'
+annealing_name = 'non-annealed'
+lims = [[-7, 4], [-4, 4]]
+for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'Circle distribution'):
+    for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'annealing={annealing_name}'):
+        try:
+            data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+            path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
+            with open(path, 'rb') as f:
+                log_data = pickle.load(f)
+            
+            sample = log_data['logs'][-1]['particles']
+
+            fig, ax = plots.plot_distributions_2d(sample, target_distributions[example_name].density, lims=lims)
+            ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+
+            save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/{method_name}/{annealing_name}')
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}.png')
+            plt.savefig(save_path)
+            plt.close()
+        except:
+            print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')

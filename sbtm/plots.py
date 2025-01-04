@@ -10,12 +10,12 @@ from sbtm import stats
 def plot_distributions(initial_particles, transported_particles, density, lims=None):
     """Plot the initial and transported particles, and the target density function, in 1D"""
     fig, ax = plt.subplots(figsize=(10, 6))
-    if lims:
-        x = np.linspace(lims[0], lims[1], 1000)
-        transported_particles = transported_particles[jnp.logical_and(transported_particles >= lims[0], transported_particles <= lims[1])]
-    else:
-        x = np.linspace(min(initial_particles + transported_particles) - 1, max(initial_particles + transported_particles) + 1, 1000)
-
+    
+    if lims is None:
+        lims = [min(min(initial_particles), min(transported_particles)) - 1, max(max(initial_particles), max(transported_particles)) + 1]
+    
+    x = np.linspace(lims[0], lims[1], 1000)
+    transported_particles = transported_particles[jnp.logical_and(transported_particles >= lims[0], transported_particles <= lims[1])]
 
     # Plot initial particles
     ax.hist(initial_particles, bins=30, density=True, alpha=0.4, color='b', histtype='bar', label='Initial Particles')
@@ -39,7 +39,7 @@ def plot_distributions(initial_particles, transported_particles, density, lims=N
 
     return fig, ax
 
-def plot_distributions_2d(particles, density, lims=None, resolution=300, num_scatter=10000):
+def plot_distributions_2d(particles, density, lims=None, resolution=400, num_scatter=10000):
     """Plot the 2D density and scatterplot the transported particles"""
     fig, ax = plt.subplots(figsize=(6, 6))
     
