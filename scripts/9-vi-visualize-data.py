@@ -16,7 +16,7 @@ for module in [density, plots, kernel, losses, models, sampler, stats, distribut
     importlib.reload(module)
 
 # Set the memory fraction for JAX
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.9'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.45'
 # Set the GPU
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -24,7 +24,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 target_distributions = {
     'gaussians_far': distribution.GaussianMixture(means=[-4, 4], covariances=[1, 1], weights=[0.25, 0.75]),  # T = 10 is enough for metastability, and T=10,000 for full convergence
     'gaussians_near': distribution.GaussianMixture(means=[-2, 2], covariances=[1, 1], weights=[0.25, 0.75]), # T = 100 is enough
-    'analytic': distribution.GaussianMixture(means=[0], covariances=[1], weights=[1]),                       # T = 5 is enough
+    'analytic': distribution.Gaussian(0, 1),                                                                 # T = 5 is enough
     'gaussians_far_2d': distribution.GaussianMixture(                                                        # T = 10 is enough for non-annealed, but there is no convergence
         means=[[-15, -15], [-15, -5], [-15, 5], [-15, 15],
                [-5, -15], [-5, -5], [-5, 5], [-5, 15],
@@ -85,56 +85,6 @@ def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, sm
     return fig, ax
 
 #%%
-# TODO: make these kinds of plots for each example for illustration
-# importlib.reload(plots)
-# lims = [(-20, 20), (-20, 20)]
-# plots.plot_distributions_2d(sde_particles[100], target_dist.density, lims=lims)[0].show()
-# plots.plot_distributions_2d(sde_particles[200], target_dist.density, lims=lims)[0].show()
-# plots.plot_distributions_2d(sde_particles[500], target_dist.density, lims=lims)[0].show()
-# plots.plot_distributions_2d(sde_particles[max_steps], target_dist.density, lims=lims)[0].show()
-
-# plots.plot_distributions_2d(sbtm_particles[100], target_dist.density, lims=lims)[0].show()
-# plots.plot_distributions_2d(sbtm_particles[200], target_dist.density, lims=lims)[0].show()
-# plots.plot_distributions_2d(sbtm_particles[500], target_dist.density, lims=lims)[0].show()
-# plots.plot_distributions_2d(sbtm_particles[max_steps], target_dist.density, lims=lims)[0].show()
-
-#%%
-# "entropy dissipation plots"
-
-# for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000), (0.1, 100000)], desc='1d Gaussian mixtures'):
-#     for example_name in tqdm(['gaussians_far', 'gaussians_near'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
-#         try:
-#             plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-#         except Exception as e:
-#             print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-        
-# plt.close('all')        
-
-# example_name = 'analytic'
-# for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'example={example_name}'):
-#     try:
-#         plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-#     except Exception as e:
-#         print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-# plt.close('all')
-
-# for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'2d Gaussian mixtures'):
-#     for example_name in tqdm(['gaussians_far_2d', 'gaussians_near_2d'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
-#         try:
-#             plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-#         except Exception as e:
-#             print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-# plt.close('all')
-
-# example_name = 'circle'
-# for (step_size, max_steps) in tqdm([(0.01, 10), (0.01, 100), (0.01, 1000), (0.01, 10000), (0.1, 10), (0.1, 100), (0.1, 1000), (0.1, 10000)], desc=f'Circle distribution'):
-#     try:
-#         plot_entropy_dissipation(example_name, target_distributions[example_name], step_size, max_steps)
-#     except Exception as e:
-#         print(f'\n Entropy dissipation plot failed for {example_name}, {step_size}, {max_steps}: \n{e}')
-# plt.close('all')
-
-#%%
 "1d Gaussian mixtures"
 
 lims_near = [-8, 8]
@@ -179,12 +129,85 @@ for (step_size, max_steps) in tqdm([(0.01, 1000), (0.01, 10000), (0.01, 100000),
                     print(f'\nFailed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
 
 #%%
+example_name = 'analytic'
+annealing_name = 'non-annealed'
+target_dist = target_distributions[example_name]
+
+def K(t):
+    return 1 - jnp.exp(-2*t)
+
+def relative_entropy_gaussians(mean1, cov1, mean2, cov2):
+    dim = mean1.shape[0]
+    cov2_inv = jnp.linalg.inv(cov2)
+    mean_diff = mean2 - mean1
+    term1 = jnp.trace(cov2_inv @ cov1)
+    term2 = mean_diff.T @ cov2_inv @ mean_diff
+    term3 = -dim
+    term4 = jnp.log(jnp.linalg.det(cov2) / jnp.linalg.det(cov1))
+    return 0.5 * (term1 + term2 + term3 + term4)
+
+smoothing = 0.5
+save = True
+
+for (step_size, max_steps) in tqdm([(0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'{example_name}'):
+    data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sbtm/{annealing_name}')
+    path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
+    with open(path, 'rb') as f:
+        log_data = pickle.load(f)
+    sbtm_particles = jnp.array([log['particles'] for log in log_data['logs']])
+    sbtm_scores = jnp.array([log['score'] for log in log_data['logs']])
+
+    data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sde/{annealing_name}')
+    path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
+    with open(path, 'rb') as f:
+        log_data = pickle.load(f)
+    sde_particles = jnp.array([log['particles'] for log in log_data['logs']])
+
+    fig, ax = plt.subplots(figsize=(10, 6))    
+    steps_to_plot = max_steps//2
+    T = steps_to_plot*step_size
+    # relative entropy dissipation
+    kl_div_time_derivative_sbtm = -stats.time_derivative(stats.compute_kl_divergences(sde_particles, target_dist.log_density), step_size)
+    kl_div_time_derivative_sbtm = jnp.where(jnp.isnan(kl_div_time_derivative_sbtm), jnp.nanmax(kl_div_time_derivative_sbtm), kl_div_time_derivative_sbtm)
+    kl_div_time_derivative_sbtm = jnp.clip(kl_div_time_derivative_sbtm, a_min=1e-5, a_max=1e4)
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sbtm, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SDE', marker='o', markersize=3, max_time=T)
+
+    kl_div_time_derivative_sde = -stats.time_derivative(stats.compute_kl_divergences(sbtm_particles, target_dist.log_density), step_size)
+    kl_div_time_derivative_sde = jnp.where(jnp.isnan(kl_div_time_derivative_sde), jnp.nanmax(kl_div_time_derivative_sde), kl_div_time_derivative_sde)
+    kl_div_time_derivative_sde = jnp.clip(kl_div_time_derivative_sde, a_min=1e-5, a_max=1e4)
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sde, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SBTM', marker='o', markersize=3, max_time=T)
+
+    # relative fisher info
+    sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(sbtm_particles, sbtm_scores, target_dist.score))
+    plots.plot_quantity_over_time(ax, stats.ema(sbtm_fisher_divs, smoothing)[:steps_to_plot], label=r'$\frac{1}{n}\sum_{i=1}^n\|\nabla \log \pi_t(X_i) - s(X_i)\|^2$, SBTM', max_time=T)
+    ax.set_yscale('log')
+    ax.set_title(f"{example_name} $\Delta t={step_size}$, $T={T}$")
+
+    # analytic entropy dissipation
+    analytic_kl_divs = []
+    for t in tqdm(jnp.linspace(0.1, 0.1 + max_steps * step_size, max_steps), desc="Computing analytic KL divergences"):
+        K_t = K(t)
+        analytic_cov = jnp.array([[K_t]])
+        analytic_kl_div = relative_entropy_gaussians(jnp.array([0.]), analytic_cov, jnp.array([0.]), jnp.array([[1.]]))
+        analytic_kl_divs.append(analytic_kl_div)
+
+    analytic_kl_div_time_derivative = -jnp.diff(jnp.array(analytic_kl_divs)) / step_size
+    analytic_kl_div_time_derivative = jnp.clip(analytic_kl_div_time_derivative, a_min=1e-5, a_max = 1e4)
+    plots.plot_quantity_over_time(ax, stats.ema(analytic_kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, Analytic', marker='o', markersize=3, yscale='log', max_time=T)
+
+    fig.show()
+    if save:
+        save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/entropy_dissipation')
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.png'))
+
+#%%
 """1d Analytic solution"""
 
 example_name = 'analytic'
 annealing_name = 'non-annealed'
 lims = [-5, 5]
-for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'example={example_name}'):
+for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'{example_name}'):
     target_samples = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=1000)
     kde = gaussian_kde(target_samples.T)
     for method_name in tqdm(['sde', 'sbtm'], leave=False, desc=f'step_size={step_size}, max_steps={max_steps}'):
@@ -193,9 +216,12 @@ for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 
             path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
             with open(path, 'rb') as f:
                 log_data = pickle.load(f)
-            
-            prior_sample = log_data['logs'][0]['particles']
-            sample = log_data['logs'][-1]['particles']
+                
+            all_particles = jnp.array([log['particles'] for log in log_data['logs']])
+
+            # initial and final particles
+            prior_sample = all_particles[0]
+            sample = all_particles[-1]
 
             fig, ax = plots.plot_distributions(prior_sample, sample, target_distributions[example_name].density, lims=lims)
             ax.set_title(fr'{method_name} {annealing_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')

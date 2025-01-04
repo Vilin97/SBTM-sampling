@@ -101,7 +101,7 @@ importlib.reload(sampler)
 num_particles = 10000
 key = jrandom.key(47)
 
-prior_dist = distribution.Gausssian(jnp.array([0]), jnp.array([[1]]))
+prior_dist = distribution.Gaussian(jnp.array([0]), jnp.array([[1]]))
 prior_sample = prior_dist.sample(key, size=num_particles)
 prior_density = prior_dist.density
 prior_score = prior_dist.score
@@ -152,12 +152,12 @@ for (target_dist, example_name) in tqdm([(target_dist_far, 'gaussians_far'), (ta
 # num_particles = 10000
 # key = jrandom.key(47)
 
-# prior_dist = distribution.Gausssian(jnp.array([0]), jnp.array([[K(t0)]]))
+# prior_dist = distribution.Gaussian(jnp.array([0]), jnp.array([[K(t0)]]))
 # prior_sample = prior_dist.sample(key, size=num_particles)
 # prior_density = prior_dist.density
 # prior_score = prior_dist.score
 
-# target_dist = distribution.Gausssian(jnp.array([0]), jnp.array([[1]]))
+# target_dist = distribution.Gaussian(jnp.array([0]), jnp.array([[1]]))
 # target_density = target_dist.density
 # target_score = target_dist.score
 

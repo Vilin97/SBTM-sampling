@@ -58,10 +58,11 @@ class GaussianMixture(Distribution):
         covariance = self.covariances[component_index]
         return jrandom.multivariate_normal(key, mean, covariance)
     
-class Gausssian(Distribution):
+class Gaussian(Distribution):
     def __init__(self, mean, covariance):
-        self.mean = jnp.array(mean)
-        self.covariance = jnp.array(covariance)
+        self.mean = jnp.array(mean, ndmin=1)
+        self.dimension = len(self.mean)
+        self.covariance = jnp.eye(self.dimension) * covariance
 
     def log_density(self, x):
         return multivariate_normal.logpdf(x, self.mean, self.covariance)

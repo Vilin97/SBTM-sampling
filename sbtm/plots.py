@@ -62,6 +62,9 @@ def plot_distributions_2d(particles, density, lims=None, resolution=400, num_sca
     scatter_particles = particles if particles.shape[0] <= num_scatter else particles[np.random.choice(particles.shape[0], num_scatter, replace=False)]
     ax.scatter(scatter_particles[:, 0], scatter_particles[:, 1], c='r', s=1, label='Transported Particles')
     
+    ax.set_xlim(lims[0])
+    ax.set_ylim(lims[1])
+    
     ax.tick_params(axis='both', which='major', labelsize=12)
     
     return fig, ax
