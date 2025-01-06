@@ -28,6 +28,9 @@ for module in [density, plots, kernel, losses, models, sampler, stats, distribut
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.45'
 
+
+# TODO: for dilation annealing, I need to initialize particles closer to a dirac delta. Otherwise, they do not feel the gradient of the annealed target distribution.
+
 #%%
 def λ(t, t_end):
     """interpolate between 0 and 1"""

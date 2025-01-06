@@ -89,7 +89,7 @@ def visualize_trajectories(particles, particle_idxs=[0, 1, 2, 3, 4], max_time=No
         ax.set_yticklabels([f'{int(x)}' for x in jnp.linspace(xmin, xmax, 9)], rotation=0)
         if max_time is not None:
             ax.set_xticks(jnp.linspace(0, num_iterations, 9))
-            ax.set_xticklabels(jnp.linspace(0, num_iterations, 9) * max_time / num_iterations, rotation=0)
+            ax.set_xticklabels(np.round(jnp.linspace(0, num_iterations, 9) * max_time / num_iterations, 4), rotation=0)
             ax.set_xlabel('Time')
         else:
             ax.set_xticks(jnp.linspace(0, num_iterations, 9))
