@@ -132,17 +132,19 @@ def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, sm
 example_name = 'analytic'
 annealing_name = 'non-annealed'
 target_dist = target_distributions[example_name]
-
 def K(t):
     return 1 - jnp.exp(-2*t)
-
+def relative_entropy_gaussians(mean1, cov1, mean2, cov2):
+    dim = mean1.shape[0]
+    cov2_inv = jnp.linalg.inv(cov2)
+    mean_diff = mean2 - mean1
+    term1 = jnp.trace(cov2_inv @ cov1)
+    term2 = mean_diff.T @ cov2_inv @ mean_diff
+    term3 = -dim
+    term4 = jnp.log(jnp.linalg.det(cov2) / jnp.linalg.det(cov1))
+    return 0.5 * (term1 + term2 + term3 + term4)
 smoothing = 0.5
 save = True
-# step_size = 0.1
-# max_steps = 50
-num_particles = 10000
-sde_l2_diffs = []
-sbtm_l2_diffs = []
 for (step_size, max_steps) in tqdm([(0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'{example_name}'):
     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sbtm/{annealing_name}')
     path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
@@ -150,62 +152,125 @@ for (step_size, max_steps) in tqdm([(0.01, 500), (0.005, 1000), (0.002, 2500)], 
         log_data = pickle.load(f)
     sbtm_particles = jnp.array([log['particles'] for log in log_data['logs']])
     sbtm_scores = jnp.array([log['score'] for log in log_data['logs']])
-
     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sde/{annealing_name}')
     path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
     with open(path, 'rb') as f:
         log_data = pickle.load(f)
     sde_particles = jnp.array([log['particles'] for log in log_data['logs']])
-
     fig, ax = plt.subplots(figsize=(10, 6))    
-    sde_l2_diff = []
-    sbtm_l2_diff = []
-
-    for t_idx, t in tqdm(list(enumerate(jnp.linspace(0.1, 0.1 + max_steps * step_size, max_steps)))):
-        sde_particles_t = sde_particles[t_idx]
-        sbtm_particles_t = sbtm_particles[t_idx]
-        
-        # KDE for SDE particles
-        sde_kde = gaussian_kde(sde_particles_t.T)
-        sde_density = sde_kde(sde_particles_t.T)
-        
-        # KDE for SBTM particles
-        sbtm_kde = gaussian_kde(sbtm_particles_t.T)
-        sbtm_density = sbtm_kde(sbtm_particles_t.T)
-        
-        # True density
-        true_density = distribution.Gaussian(0, K(t)).density(sde_particles_t)
-        
-        # Compute L2 distance
-        sde_l2_diff.append(jnp.linalg.norm(sde_density - true_density) / num_particles)
-        sbtm_l2_diff.append(jnp.linalg.norm(sbtm_density - true_density) / num_particles)
-
-    sde_l2_diffs.append(sde_l2_diff)
-    sbtm_l2_diffs.append(sbtm_l2_diff)
+    steps_to_plot = max_steps//2
+    T = steps_to_plot*step_size
     
-    plots.plot_quantity_over_time(ax, sde_l2_diff, label='SDE', yscale='log', max_time=max_steps*step_size)
-    plots.plot_quantity_over_time(ax, sbtm_l2_diff, label='SBTM', yscale='log', max_time=max_steps*step_size)
-    ax.set_ylabel(r'$L^2$ distance')
-    ax.set_title(f'{example_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+    # relative entropy dissipation
+    kl_div_time_derivative_sde = -stats.time_derivative(stats.compute_kl_divergences(sde_particles, target_dist.log_density), step_size)
+    kl_div_time_derivative_sde = jnp.where(jnp.isnan(kl_div_time_derivative_sde), jnp.nanmax(kl_div_time_derivative_sde), kl_div_time_derivative_sde)
+    kl_div_time_derivative_sde = jnp.clip(kl_div_time_derivative_sde, a_min=1e-5, a_max=1e4)
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sde, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SDE', marker='o', markersize=3, max_time=T)
+    
+    kde_scores = [stats.compute_score(sample_f) for sample_f in sde_particles]
+    kde_fisher_divs = jnp.array(stats.compute_fisher_divergences(sde_particles, kde_scores, target_dist.score))
+    plots.plot_quantity_over_time(ax, stats.ema(kde_fisher_divs, smoothing)[:steps_to_plot], label=r'$\frac{1}{n}\sum_{i=1}^n\|\nabla \log \pi_t(X_i) - \nabla \log f(X_i)\|^2$, KDE', max_time=steps_to_plot*step_size)
+    
+    # relative fisher info
+    sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(sbtm_particles, sbtm_scores, target_dist.score))
+    plots.plot_quantity_over_time(ax, stats.ema(sbtm_fisher_divs, smoothing)[:steps_to_plot], label=r'$\frac{1}{n}\sum_{i=1}^n\|\nabla \log \pi_t(X_i) - s(X_i)\|^2$, SBTM', max_time=T)
     ax.set_yscale('log')
-
+    ax.set_title(f"{example_name} $\Delta t={step_size}$, $T={T}$")
+    
+    # analytic entropy dissipation
+    analytic_kl_divs = []
+    for t in tqdm(jnp.linspace(0.1, 0.1 + max_steps * step_size, max_steps), desc="Computing analytic KL divergences"):
+        K_t = K(t)
+        analytic_cov = jnp.array([[K_t]])
+        analytic_kl_div = relative_entropy_gaussians(jnp.array([0.]), analytic_cov, jnp.array([0.]), jnp.array([[1.]]))
+        analytic_kl_divs.append(analytic_kl_div)
+    analytic_kl_div_time_derivative = -jnp.diff(jnp.array(analytic_kl_divs)) / step_size
+    analytic_kl_div_time_derivative = jnp.clip(analytic_kl_div_time_derivative, a_min=1e-5, a_max = 1e4)
+    plots.plot_quantity_over_time(ax, stats.ema(analytic_kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, Analytic', marker='o', markersize=3, yscale='log', max_time=T)
     fig.show()
     if save:
-        save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/l2_distance')
+        save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/entropy_dissipation/sde')
         os.makedirs(save_dir, exist_ok=True)
         plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.png'))
+        
+# #%%
+# example_name = 'analytic'
+# annealing_name = 'non-annealed'
+# target_dist = target_distributions[example_name]
 
-# Save L2 differences
-save_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/l2_diffs')
-os.makedirs(save_dir, exist_ok=True)
-sde_l2_diff_path = os.path.join(save_dir, 'sde_l2_diffs.pkl')
-sbtm_l2_diff_path = os.path.join(save_dir, 'sbtm_l2_diffs.pkl')
+# def K(t):
+#     return 1 - jnp.exp(-2*t)
 
-with open(sde_l2_diff_path, 'wb') as f:
-    pickle.dump(sde_l2_diffs, f)
+# smoothing = 0.5
+# save = True
+# # step_size = 0.1
+# # max_steps = 50
+# num_particles = 10000
+# sde_l2_diffs = []
+# sbtm_l2_diffs = []
+# for (step_size, max_steps) in tqdm([(0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'{example_name}'):
+#     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sbtm/{annealing_name}')
+#     path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
+#     with open(path, 'rb') as f:
+#         log_data = pickle.load(f)
+#     sbtm_particles = jnp.array([log['particles'] for log in log_data['logs']])
+#     sbtm_scores = jnp.array([log['score'] for log in log_data['logs']])
 
-with open(sbtm_l2_diff_path, 'wb') as f:
-    pickle.dump(sbtm_l2_diffs, f)
+#     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sde/{annealing_name}')
+#     path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
+#     with open(path, 'rb') as f:
+#         log_data = pickle.load(f)
+#     sde_particles = jnp.array([log['particles'] for log in log_data['logs']])
+
+#     fig, ax = plt.subplots(figsize=(10, 6))    
+#     sde_l2_diff = []
+#     sbtm_l2_diff = []
+
+#     for t_idx, t in tqdm(list(enumerate(jnp.linspace(0.1, 0.1 + max_steps * step_size, max_steps)))):
+#         sde_particles_t = sde_particles[t_idx]
+#         sbtm_particles_t = sbtm_particles[t_idx]
+        
+#         # KDE for SDE particles
+#         sde_kde = gaussian_kde(sde_particles_t.T)
+#         sde_density = sde_kde(sde_particles_t.T)
+        
+#         # KDE for SBTM particles
+#         sbtm_kde = gaussian_kde(sbtm_particles_t.T)
+#         sbtm_density = sbtm_kde(sbtm_particles_t.T)
+        
+#         # True density
+#         true_density = distribution.Gaussian(0, K(t)).density(sde_particles_t)
+        
+#         # Compute L2 distance
+#         sde_l2_diff.append(jnp.linalg.norm(sde_density - true_density) / num_particles)
+#         sbtm_l2_diff.append(jnp.linalg.norm(sbtm_density - true_density) / num_particles)
+
+#     sde_l2_diffs.append(sde_l2_diff)
+#     sbtm_l2_diffs.append(sbtm_l2_diff)
+    
+#     plots.plot_quantity_over_time(ax, sde_l2_diff, label='SDE', yscale='log', max_time=max_steps*step_size)
+#     plots.plot_quantity_over_time(ax, sbtm_l2_diff, label='SBTM', yscale='log', max_time=max_steps*step_size)
+#     ax.set_ylabel(r'$L^2$ distance')
+#     ax.set_title(f'{example_name} $\Delta t={step_size}$, $T={max_steps*step_size}$')
+#     ax.set_yscale('log')
+
+#     fig.show()
+#     if save:
+#         save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/l2_distance')
+#         os.makedirs(save_dir, exist_ok=True)
+#         plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.png'))
+
+# # Save L2 differences
+# save_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/l2_diffs')
+# os.makedirs(save_dir, exist_ok=True)
+# sde_l2_diff_path = os.path.join(save_dir, 'sde_l2_diffs.pkl')
+# sbtm_l2_diff_path = os.path.join(save_dir, 'sbtm_l2_diffs.pkl')
+
+# with open(sde_l2_diff_path, 'wb') as f:
+#     pickle.dump(sde_l2_diffs, f)
+
+# with open(sbtm_l2_diff_path, 'wb') as f:
+#     pickle.dump(sbtm_l2_diffs, f)
 
 #%%
 # """1d Analytic solution"""
