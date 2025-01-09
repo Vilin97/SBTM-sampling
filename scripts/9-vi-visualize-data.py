@@ -63,15 +63,15 @@ def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, sm
     T = max_steps*step_size
 
     # relative entropy dissipation
-    kl_div_time_derivative_sbtm = -stats.time_derivative(stats.compute_kl_divergences(sde_particles, target_dist.log_density), step_size)
-    kl_div_time_derivative_sbtm = jnp.where(jnp.isnan(kl_div_time_derivative_sbtm), jnp.nanmax(kl_div_time_derivative_sbtm), kl_div_time_derivative_sbtm)
-    kl_div_time_derivative_sbtm = jnp.clip(kl_div_time_derivative_sbtm, a_min=1e-5, a_max=1e4)
-    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sbtm, smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SDE', marker='o', markersize=3, max_time=T)
-
-    kl_div_time_derivative_sde = -stats.time_derivative(stats.compute_kl_divergences(sbtm_particles, target_dist.log_density), step_size)
+    kl_div_time_derivative_sde = -stats.time_derivative(stats.compute_kl_divergences(sde_particles, target_dist.log_density), step_size)
     kl_div_time_derivative_sde = jnp.where(jnp.isnan(kl_div_time_derivative_sde), jnp.nanmax(kl_div_time_derivative_sde), kl_div_time_derivative_sde)
     kl_div_time_derivative_sde = jnp.clip(kl_div_time_derivative_sde, a_min=1e-5, a_max=1e4)
-    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sde, smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SBTM', marker='o', markersize=3, max_time=T)
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sde, smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SDE', marker='o', markersize=3, max_time=T)
+
+    kl_div_time_derivative_sbtm = -stats.time_derivative(stats.compute_kl_divergences(sbtm_particles, target_dist.log_density), step_size)
+    kl_div_time_derivative_sbtm = jnp.where(jnp.isnan(kl_div_time_derivative_sbtm), jnp.nanmax(kl_div_time_derivative_sbtm), kl_div_time_derivative_sbtm)
+    kl_div_time_derivative_sbtm = jnp.clip(kl_div_time_derivative_sbtm, a_min=1e-5, a_max=1e4)
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative_sbtm, smoothing), label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SBTM', marker='o', markersize=3, max_time=T)
 
     # relative fisher info
     sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(sbtm_particles, sbtm_scores, target_dist.score))
@@ -291,7 +291,7 @@ def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, sm
 # #                 except:
 # #                     print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
 
-# # #%%
+#%%
 "Circle distribution"
 importlib.reload(distribution)
 

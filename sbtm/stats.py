@@ -65,3 +65,13 @@ def exponential_moving_average(data, smoothing):
 def square_norm_diff(x, y):
     """|x - y|²"""
     return jnp.sum(jnp.square(x - y))
+
+def relative_entropy_gaussians(mean1, cov1, mean2, cov2):
+    dim = mean1.shape[0]
+    cov2_inv = jnp.linalg.inv(cov2)
+    mean_diff = mean2 - mean1
+    term1 = jnp.trace(cov2_inv @ cov1)
+    term2 = mean_diff.T @ cov2_inv @ mean_diff
+    term3 = -dim
+    term4 = jnp.log(jnp.linalg.det(cov2) / jnp.linalg.det(cov1))
+    return 0.5 * (term1 + term2 + term3 + term4)
