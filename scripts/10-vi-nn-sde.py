@@ -55,15 +55,88 @@ prior_dist = distribution.Gaussian(jnp.array([0.]), jnp.array([[K(t0)]]))
 prior_density = prior_dist.density
 prior_score = prior_dist.score
 
+target_dist = distribution.Gaussian(jnp.array([0.]), jnp.array([[1.]])) 
+
+# #%%
+# example_name = 'analytic'
+# annealing_name = 'non-annealed'
+# step_size = 0.01
+# max_steps = 500
+# method_name = 'sbtm'
+
+# num_particles = 1000
+# num_particles_str = '' if num_particles==1000 else '_particles_10000'
+
+# # load particles
+# data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+# path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}{num_particles_str}.pkl')
+# with open(path, 'rb') as f:
+#     log_data = pickle.load(f)
+# particles = [log['particles'] for log in log_data['logs']]
+
+# # train initial NN
+# prior_sample = particles[0]
+# prior_score_values = prior_score(prior_sample)
+# score_model = models.ResNet(models.MLP(d=prior_sample.shape[1]))
+# optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+# for i in range(1001):
+#     loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_sample, prior_score_values)
+#     optimizer.update(grads)
+#     if i % 100 == 0:
+#         print(f"Loss: {loss_value}")
+
+# #%%
+# plots.plot_distributions(prior_sample, particles[-1], target_dist.density)
+
+# # Plot the score model and prior score
+# fig, ax = plt.subplots(figsize=(10, 6))
+
+# # Plot prior score
+# x = jnp.linspace(-3, 3, 1000).reshape(-1, 1)
+# prior_score_values = prior_score(x)
+# ax.plot(x, prior_score_values, label='Prior Score', color='blue')
+
+# # Plot score model
+# score_model_values = score_model(x)
+# ax.plot(x, score_model_values, label='Score Model', color='green')
+
+# ax.set_title('Score Model vs Prior Score')
+# ax.legend()
+# fig.show()
+
+# #%%
+# # compare the sbtm score values in simulation to the post-trained ones
+# # train initial NN
+# prior_sample = particles[0]
+# prior_score_values = prior_score(prior_sample)
+# score_model = models.ResNet(models.MLP(d=prior_sample.shape[1]))
+# optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+# for i in range(1001):
+#     loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_sample, prior_score_values)
+#     optimizer.update(grads)
+#     if i % 100 == 0:
+#         print(f"Loss: {loss_value}")
+
+# # train NN
+# score_values = []
+
+# for particles_i in tqdm(particles, desc='Training'):
+#     train_step(particles_i, score_model, optimizer)
+#     score_values.append(score_model(particles_i))
+
 #%%
 example_name = 'analytic'
 annealing_name = 'non-annealed'
 step_size = 0.002
 max_steps = 2500
-for method_name in ['sde', 'sbtm']:
+
+num_particles = 10000
+num_particles_str = '' if num_particles==1000 else '_particles_10000'
+
+for method_name in ['sbtm', 'sde']:
     # load particles
     data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
-    path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
+    path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}{num_particles_str}.pkl')
     with open(path, 'rb') as f:
         log_data = pickle.load(f)
     particles = [log['particles'] for log in log_data['logs']]
@@ -73,21 +146,21 @@ for method_name in ['sde', 'sbtm']:
     prior_score_values = prior_score(prior_sample)
     score_model = models.ResNet(models.MLP(d=prior_sample.shape[1]))
     optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
-    for i in range(101):
+    for i in range(1001):
         loss_value, grads = nnx.value_and_grad(losses.explicit_score_matching_loss)(score_model, prior_sample, prior_score_values)
         optimizer.update(grads)
-        if i % 10 == 0:
+        if i % 100 == 0:
             print(f"Loss: {loss_value}")
 
     # train NN
     score_values = []
 
-    for particles_i in tqdm(particles, desc='Training'):
+    for particles_i in tqdm(particles, desc=f'Training NN, {method_name}'):
         train_step(particles_i, score_model, optimizer)
-        score_values.append(score_model(particles[i]))
+        score_values.append(score_model(particles_i))
 
     # Save score values
-    score_values_path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000_score.pkl')
+    score_values_path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}{num_particles_str}_score.pkl')
     with open(score_values_path, 'wb') as f:
         pickle.dump(score_values, f)
 
@@ -119,7 +192,7 @@ for method_name in ['sde', 'sbtm']:
 
     analytic_kl_div_time_derivative = -jnp.diff(jnp.array(analytic_kl_divs)) / step_size
     analytic_kl_div_time_derivative = jnp.clip(analytic_kl_div_time_derivative, a_min=1e-5, a_max = 1e4)
-    plots.plot_quantity_over_time(ax, stats.ema(analytic_kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, Analytic', marker='o', markersize=3, yscale='log', max_time=T)
+    plots.plot_quantity_over_time(ax, stats.ema(analytic_kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, Analytic', marker='o', markersize=3, yscale='log', max_time=T, color='red')
 
 
     ax.set_yscale('log')
@@ -128,5 +201,5 @@ for method_name in ['sde', 'sbtm']:
 
     save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/entropy_dissipation/{method_name}')
     os.makedirs(save_dir, exist_ok=True)
-    plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.png'))
+    plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}{num_particles_str}.png'))
 
