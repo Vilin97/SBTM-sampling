@@ -26,7 +26,7 @@ for module in [density, plots, kernel, losses, models, sampler, stats, distribut
     importlib.reload(module)
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.45'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.9'
 
 
 # TODO: for dilation annealing, I need to initialize particles closer to a dirac delta. Otherwise, they do not feel the gradient of the annealed target distribution.
@@ -54,7 +54,7 @@ def run_sbtm(prior_sample, target_score, step_size, max_steps, prior_score=None)
         optimizer.update(grads)
         if loss_value < 1e-4:
             break
-    print(f"Trained initial NN in {i} iterations, loss: {loss_value}")
+    print(f"\nTrained initial NN in {i} iterations, loss: {loss_value}\n")
 
     # sample
     logger = sampler.Logger()
@@ -164,6 +164,7 @@ key = jrandom.key(47)
 # sample
 # for (step_size, max_steps) in tqdm([(0.1, 50), (0.05, 100), (0.02, 250), (0.01, 500), (0.005, 1000), (0.002, 2500)], desc='Analytic'):
 for (step_size, max_steps) in tqdm([(0.01, 500), (0.002, 2500)], desc='Analytic'):
+    # for d in tqdm([1], desc=f'{step_size} * {max_steps}', leave=False):    
     for d in tqdm([3, 5, 10, 20], desc=f'{step_size} * {max_steps}', leave=False):    
         prior_dist = distribution.Gaussian(jnp.zeros(d), jnp.eye(d) * K(t0))
         prior_sample = prior_dist.sample(key, size=num_particles)

@@ -187,7 +187,7 @@ class SBTMSampler(ODESampler):
         loss_values = []
         num_particles = self.state.particles.shape[0]
         num_batches = num_particles // self.mini_batch_size
-
+        # TODO: shuffle before batching
         while not self.gd_stopping_criterion(loss_values, batch_loss_values):
             loss_values.append(self.loss(self.score_model, self.state.particles))
             for i in range(num_batches):
