@@ -129,7 +129,7 @@ class FixedNumBatches(GDStoppingCriterion):
 class AbsoluteLossChange(GDStoppingCriterion):
     """Stop when the absolute change in loss is below a threshold"""
 
-    def __init__(self, threshold=0.01):
+    def __init__(self, threshold=0.02):
         self.threshold = threshold
 
     def __call__(self, loss_values, batch_loss_values):

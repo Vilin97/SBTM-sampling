@@ -192,4 +192,3 @@ plots.plot_losses(loss_values, batch_loss_values)
 plots.plot_fisher_divergence(logger.get_trajectory('particles')[::10], target_score, logger.get_trajectory('score')[::10])
 
 # %%
-# TODO: instead of annealing, try simulated tempering: target_score / temperature, temperature(t=0) = large, temperature(t=T) = 1
