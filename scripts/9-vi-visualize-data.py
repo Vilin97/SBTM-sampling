@@ -16,7 +16,7 @@ for module in [density, plots, kernel, losses, models, sampler, stats, distribut
     importlib.reload(module)
 
 # Set the memory fraction for JAX
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.45'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.9'
 # Set the GPU
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -239,50 +239,68 @@ def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, sm
 #         except:
 #             print(f'Failed for {example_name}, {method_name}, {annealing_name}, {step_size}, {max_steps}')
 #%%
-example_name = 'analytic'
-annealing_name = 'non-annealed'
-def K(t):
-    return 1 - jnp.exp(-2*t)
+def λ(t, t_end):
+    """interpolate between 0 and 1"""
+    t = (t/t_end)
+    return t
 
-smoothing = 0.5
-save = False
+def dilation_score(t, x, target_score, threshold=0.2):
+    t = np.clip(t, threshold, 1)
+    return target_score(x/t)
 
-d = 10
-target_dist = distribution.Gaussian(jnp.zeros(d), jnp.eye(d))
+def geometric_mean_score(t, x, prior_score, target_score):
+    return t * target_score(x) + (1-t) * prior_score(x)
+
+example_name = 'gaussians_far_2d'
+d = 2
+annealing_name = 'dilation'
+
 step_size = 0.01
-max_steps = 500
+max_steps = 10000
 
-# for (step_size, max_steps) in tqdm([(0.01, 500), (0.005, 1000), (0.002, 2500)], desc=f'{example_name}'):
-data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/d_{d}/sbtm/{annealing_name}')
-path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.pkl')
+prior_dist = distribution.Gaussian(jnp.zeros(d), jnp.eye(d))
+
+target_dist = target_distributions[example_name]
+if annealing_name == 'geometric':
+    annealed_score = lambda t,x : geometric_mean_score(λ(t, step_size*max_steps), x, prior_dist.score, target_dist.score)
+elif annealing_name == 'dilation':
+    annealed_score = lambda t,x : dilation_score(λ(t, step_size*max_steps), x, target_dist.score)
+elif annealing_name == 'non-annealed':
+    annealed_score = lambda t,x: target_dist.score(x)
+
+data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/sbtm/{annealing_name}')
+path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}.pkl')
 with open(path, 'rb') as f:
     log_data = pickle.load(f)
-sbtm_particles = jnp.array([log['particles'] for log in log_data['logs']])
-sbtm_scores = jnp.array([log['score'] for log in log_data['logs']])
+particles = jnp.array([log['particles'] for log in log_data['logs']])
+scores = jnp.array([log['score'] for log in log_data['logs']])
 
+# compute d/dt KL
+kl_div_time_derivative = -stats.time_derivative(stats.compute_kl_divergences(particles, target_dist.log_density), step_size)
+kl_div_time_derivative = jnp.where(jnp.isnan(kl_div_time_derivative), jnp.nanmax(kl_div_time_derivative), kl_div_time_derivative)
+kl_div_time_derivative = jnp.clip(kl_div_time_derivative, a_min=1e-5, a_max=1e4)
+
+# compute relative Fisher info
+fisher_divs = []
+ts = jnp.linspace(0.0, step_size*max_steps, max_steps)
+for ti, particles_i, scores_i in list(zip(ts, particles, scores)):
+    value = jnp.mean(jax.vmap(lambda x,y: jnp.dot(x, y))(scores_i - target_dist.score(particles_i), scores_i - annealed_score(ti, particles_i)))
+    fisher_divs.append(value)
+
+#%%
+smoothing = 0.8
+save = True
+steps_to_plot = max_steps
+
+# plot
 fig, ax = plt.subplots(figsize=(10, 6))    
-steps_to_plot = max_steps//4
 T = steps_to_plot*step_size
-
-# relative fisher info
-sbtm_fisher_divs = jnp.array(stats.compute_fisher_divergences(sbtm_particles, sbtm_scores, target_dist.score))
-plots.plot_quantity_over_time(ax, stats.ema(sbtm_fisher_divs, smoothing)[:steps_to_plot], label=r'$\frac{1}{n}\sum_{i=1}^n\|\nabla \log \pi_t(X_i) - s(X_i)\|^2$, SBTM', max_time=T)
-ax.set_yscale('log')
-ax.set_title(f"{example_name} $\Delta t={step_size}$, $T={T}$, d={d}")
-
-# analytic entropy dissipation
-analytic_kl_divs = []
-for t in tqdm(jnp.linspace(0.1, 0.1 + max_steps * step_size, max_steps), desc="Computing analytic KL divergences"):
-    K_t = K(t)
-    analytic_cov = jnp.array(K_t * jnp.eye(d))
-    analytic_kl_div = stats.relative_entropy_gaussians(jnp.zeros(d), analytic_cov, target_dist.mean, target_dist.covariance)
-    analytic_kl_divs.append(analytic_kl_div)
-analytic_kl_div_time_derivative = -jnp.diff(jnp.array(analytic_kl_divs)) / step_size
-analytic_kl_div_time_derivative = jnp.clip(analytic_kl_div_time_derivative, a_min=1e-5, a_max = 1e4)
-plots.plot_quantity_over_time(ax, stats.ema(analytic_kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, Analytic', marker='o', markersize=3, yscale='log', max_time=T)
+plots.plot_quantity_over_time(ax, stats.ema(fisher_divs, smoothing)[:steps_to_plot], label=fr'$\frac{{1}}{{n}}\sum_{{i=1}}^n \langle s(X_i) - \nabla \log \pi(X_i),  s(X_i) - \nabla \log \pi_t(X_i) \rangle$, SBTM', max_time=T)
+plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SBTM', markersize=3, max_time=T)
+ax.set_title(f"{example_name} Δt = {step_size}, T={T} {annealing_name}")
 
 fig.show()
 if save:
-    save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/d_{d}/entropy_dissipation')
+    save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/entropy_dissipation/{annealing_name}')
     os.makedirs(save_dir, exist_ok=True)
     plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.png'))
