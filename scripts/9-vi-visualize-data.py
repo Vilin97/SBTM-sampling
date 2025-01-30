@@ -288,19 +288,18 @@ for ti, particles_i, scores_i in list(zip(ts, particles, scores)):
     fisher_divs.append(value)
 
 #%%
-smoothing = 0.8
-save = True
-steps_to_plot = max_steps
+save = False
+for (steps_to_plot, smoothing) in zip([1000, 2000, 5000, 10000], [0.8, 0.9, 0.95, 0.99]):
 
-# plot
-fig, ax = plt.subplots(figsize=(10, 6))    
-T = steps_to_plot*step_size
-plots.plot_quantity_over_time(ax, stats.ema(fisher_divs, smoothing)[:steps_to_plot], label=fr'$\frac{{1}}{{n}}\sum_{{i=1}}^n \langle s(X_i) - \nabla \log \pi(X_i),  s(X_i) - \nabla \log \pi_t(X_i) \rangle$, SBTM', max_time=T)
-plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SBTM', markersize=3, max_time=T)
-ax.set_title(f"{example_name} Δt = {step_size}, T={T} {annealing_name}")
+    # plot
+    fig, ax = plt.subplots(figsize=(10, 6))    
+    T = steps_to_plot*step_size
+    plots.plot_quantity_over_time(ax, stats.ema(kl_div_time_derivative, smoothing)[:steps_to_plot], label=rf'$-\frac{{d}}{{dt}} KL(f_t||\pi)$, SBTM', markersize=3, max_time=T)
+    plots.plot_quantity_over_time(ax, stats.ema(fisher_divs, smoothing)[:steps_to_plot], label=fr'$\frac{{1}}{{n}}\sum_{{i=1}}^n \langle s(X_i) - \nabla \log \pi(X_i),  s(X_i) - \nabla \log \pi_t(X_i) \rangle$, SBTM', max_time=T)
+    ax.set_title(f"{example_name} Δt = {step_size}, T={T} {annealing_name}")
 
-fig.show()
-if save:
-    save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/entropy_dissipation/{annealing_name}')
-    os.makedirs(save_dir, exist_ok=True)
-    plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_10000.png'))
+    fig.show()
+    if save:
+        save_dir = os.path.expanduser(f'~/SBTM-sampling/plots/{example_name}/entropy_dissipation/{annealing_name}')
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, f'stepsize_{step_size}_numsteps_{steps_to_plot}_particles_10000.png'))
