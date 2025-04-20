@@ -198,7 +198,7 @@ diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
 
 
 # @jax.jit
-def loss_fn(rng, model, params, x, marginal_prob_std, eps=1e-5):
+def loss_fn(rng, model, params, x, marginal_prob_std, reg=1e-3, t_range=(1e-5, 1.0)):
     """The loss function for training score-based generative models.
 
     Args:
@@ -211,14 +211,13 @@ def loss_fn(rng, model, params, x, marginal_prob_std, eps=1e-5):
     eps: A tolerance value for numerical stability.
     """
     rng, step_rng = jax.random.split(rng)
-    random_t = jax.random.uniform(step_rng, (x.shape[0],), minval=eps, maxval=1.)
+    random_t = jax.random.uniform(step_rng, (x.shape[0],), minval=t_range[0], maxval=t_range[1])
     rng, step_rng = jax.random.split(rng)
     z = jax.random.normal(step_rng, x.shape)
     std = marginal_prob_std(random_t)
     perturbed_x = x + z * std[:, None, None, None]
     score = model(params, perturbed_x, random_t)
-    loss = jnp.mean(jnp.sum((score * std[:, None, None, None] + z)**2,
-                            axis=(1, 2, 3)))
+    loss = jnp.mean(jnp.sum((score * std[:, None, None, None] + z)**2 + reg * score**2, axis=(1, 2, 3)))
     return loss
 
 
@@ -245,11 +244,11 @@ def get_train_step_fn(model, marginal_prob_std):
 
 # %%
 # Main
-preprocessing = "scaled"   # "standardized", None
+preprocessing = "scaled"   
 
-n_epochs = 151       # 50, @param {'type':'integer'}
-batch_size = 256    # @param {'type':'integer'}
-lr = 1e-4           # @param {'type':'number'}
+n_epochs = 151       
+batch_size = 256    
+lr = 1e-4           
 
 rng = jax.random.PRNGKey(0)
 fake_input = jnp.ones((batch_size, 28, 28, 1))
@@ -279,36 +278,94 @@ elif preprocessing == "scaled":
 elif preprocessing is None:
     pass
 data = jnp.transpose(a=data, axes=(0, 2, 3, 1))
-# data = data + 1e-4 * np.random.randn(*data.shape)
+data = data + 1e-4 * jax.random.normal(rng, data.shape)
 
-# data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-optimizer = optax.adam(learning_rate=lr)
+optimizer = optax.adamw(learning_rate=lr)
 train_state_ = train_state.TrainState.create(
     apply_fn=score_model.apply, params=params, tx=optimizer
 )
 train_step_fn = jax.jit(get_train_step_fn(score_model, marginal_prob_std_fn))
 
-data_shape = (jax.local_device_count(), -1, 28, 28, 1)
 #%%
 from tqdm import tqdm
 
 for epoch in tqdm(range(n_epochs), desc='Epochs'):
+    # Shuffle data at the beginning of each epoch
+    shuffle_rng, rng = jax.random.split(rng)
+    shuffle_idx = jax.random.permutation(shuffle_rng, len(data))
+    shuffled_data = data[shuffle_idx]
+    
     avg_loss = 0.
     num_items = 0
     for i in range(len(data) // batch_size - 1):
-        indices = jnp.arange(i, i + batch_size)
-        x = data[indices]
+        indices = jnp.arange(i * batch_size, (i + 1) * batch_size)
+        x = shuffled_data[indices]
         rng, step_rng = jax.random.split(rng)
         step_rng = jnp.asarray(step_rng)
         loss, train_state_ = train_step_fn(step_rng, x, train_state_)
         avg_loss += loss
-        if i % 100 == 0:
-            print(loss)
-    # Print the averaged training loss so far.
+    
     print('Average Loss: {:5f}'.format(avg_loss / (len(data) // batch_size - 1)))
     if epoch % 10 == 0:
-        # Update the checkpoint after each 10 epochs of training.
-        checkpoints.save_checkpoint(
-            ckpt_dir=dir_data_models_mnist, target=train_state_, step=epoch, keep=100, overwrite=True
-        )
+        checkpoints.save_checkpoint(ckpt_dir=dir_data_models_mnist, target=train_state_, step=epoch, keep=100, overwrite=True)
 # %%
+# evaluate what we have learned
+# noise a digit at different noise levels and see how strong is the gradient
+import matplotlib.pyplot as plt
+
+i = 0
+batch = data[i:i+5] 
+batch = batch + 1e-1 * jax.random.normal(rng, batch.shape)
+
+# load the latest checkpoint
+checkpoint = checkpoints.restore_checkpoint(
+    ckpt_dir=dir_data_models_mnist,
+    target=train_state_
+)
+
+model = ScoreNet(marginal_prob_std_fn)
+params = checkpoint.params
+def score(x_batch):
+    t = jnp.ones(x_batch.shape[0])
+    return model.apply(params, x_batch, t)
+
+s = score(batch/0.01)
+for x, sx in zip(batch, s):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    
+    # Plot original image
+    im0 = axes[0].imshow(x.squeeze(), cmap='gray')
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+    
+    # Plot score
+    im1 = axes[1].imshow(sx.squeeze(), cmap='gray')
+    axes[1].set_title('Score s(x/0.01)')
+    axes[1].axis('off')
+    fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+    
+    plt.tight_layout()
+    plt.show()
+
+#%%
+# sample
+batch = jax.random.normal(rng, (16, 28, 28, 1))
+num_steps = 500
+step_size = 0.001
+
+for ti in tqdm(range(num_steps)):
+    t = (ti + 1e-3) * step_size
+    s = model.apply(params, batch / t, jnp.ones(batch.shape[0]))
+    batch += step_size * s 
+    batch += jnp.sqrt(step_size) * jax.random.normal(rng, batch.shape)
+    if ti % 10 == 0:
+        fig, axes = plt.subplots(4, 4, figsize=(10, 10))
+        for i in range(min(16, batch.shape[0])):
+            row, col = i // 4, i % 4
+            im = axes[row, col].imshow(batch[i].squeeze(), cmap='gray')
+            axes[row, col].axis('off')
+        
+        # Add a single colorbar for the entire grid
+        plt.tight_layout()
+        plt.show()

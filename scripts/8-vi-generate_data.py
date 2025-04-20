@@ -1,13 +1,6 @@
 #%%
 """Generate the data for several examples"""
 
-import numpy as np
-from scipy.stats import norm
-from scipy.integrate import quad
-import matplotlib.pyplot as plt
-from jax.scipy.stats import multivariate_normal
-
-import jax
 import importlib
 import numpy as np
 import jax.numpy as jnp
@@ -15,9 +8,7 @@ import jax.random as jrandom
 from sbtm import density, plots, kernel, losses, models, sampler, stats, distribution
 from flax import nnx
 import optax
-import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scipy.stats import gaussian_kde
 import pickle
 import os
 

@@ -66,6 +66,7 @@ class Sampler:
             if step_number == self.max_steps or self.state.t >= self.t_end:
                 break
             step_size = self.step_size(step_number)
+            # TODO: put particles on the CPU before logging
             to_log = {'particles': self.state.particles, 'step_number': step_number, 'step_size': step_size, 'time': self.state.t}
             step_log = self.step(step_number)
             to_log.update(step_log)
