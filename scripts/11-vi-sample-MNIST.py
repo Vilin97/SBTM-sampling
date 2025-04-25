@@ -21,6 +21,7 @@ import optax
 import flax.training.train_state as train_state
 import struct
 import urllib.request
+from tqdm import tqdm
 
 dir_data = os.path.expanduser(f'~/SBTM-sampling/data')
 dir_data_mnist = os.path.join(dir_data, 'mnist')
@@ -243,7 +244,7 @@ def get_train_step_fn(model, marginal_prob_std):
 
 
 # %%
-# Main
+# Define dataset
 preprocessing = "scaled"   
 
 n_epochs = 151       
@@ -278,7 +279,7 @@ elif preprocessing == "scaled":
 elif preprocessing is None:
     pass
 data = jnp.transpose(a=data, axes=(0, 2, 3, 1))
-data = data + 1e-4 * jax.random.normal(rng, data.shape)
+data = data #+ 1e-4 * jax.random.normal(rng, data.shape)
 
 optimizer = optax.adamw(learning_rate=lr)
 train_state_ = train_state.TrainState.create(
@@ -287,8 +288,7 @@ train_state_ = train_state.TrainState.create(
 train_step_fn = jax.jit(get_train_step_fn(score_model, marginal_prob_std_fn))
 
 #%%
-from tqdm import tqdm
-
+# Train
 for epoch in tqdm(range(n_epochs), desc='Epochs'):
     # Shuffle data at the beginning of each epoch
     shuffle_rng, rng = jax.random.split(rng)
@@ -314,7 +314,7 @@ for epoch in tqdm(range(n_epochs), desc='Epochs'):
 import matplotlib.pyplot as plt
 
 i = 0
-batch = data[i:i+5] 
+batch = data[i:i+1] 
 batch = batch + 1e-1 * jax.random.normal(rng, batch.shape)
 
 # load the latest checkpoint
@@ -326,10 +326,11 @@ checkpoint = checkpoints.restore_checkpoint(
 model = ScoreNet(marginal_prob_std_fn)
 params = checkpoint.params
 def score(x_batch):
-    t = jnp.ones(x_batch.shape[0])
+    t = jnp.ones(x_batch.shape[0]) * 0.01
     return model.apply(params, x_batch, t)
 
-s = score(batch/0.01)
+# s = score(batch/0.01)
+s = score(batch)
 for x, sx in zip(batch, s):
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     
@@ -349,20 +350,47 @@ for x, sx in zip(batch, s):
     plt.show()
 
 #%%
-# sample
+# diffusion sample
 batch = jax.random.normal(rng, (16, 28, 28, 1))
 num_steps = 500
-step_size = 0.001
+step_size = 1/num_steps
+tis = jnp.linspace(1.0, 1e-3, num_steps)
 
-for ti in tqdm(range(num_steps)):
-    t = (ti + 1e-3) * step_size
-    s = model.apply(params, batch / t, jnp.ones(batch.shape[0]))
-    batch += step_size * s 
-    batch += jnp.sqrt(step_size) * jax.random.normal(rng, batch.shape)
+for (ti,t) in tqdm(enumerate(tis)):
+    step_rng, rng = jax.random.split(rng)
+    s = model.apply(params, batch, jnp.ones(batch.shape[0])*t)
+    batch += step_size * s / 2
+    batch += jnp.sqrt(step_size) * jax.random.normal(step_rng, batch.shape)
     if ti % 10 == 0:
+        print(f"{t=}")
         fig, axes = plt.subplots(4, 4, figsize=(10, 10))
         for i in range(min(16, batch.shape[0])):
             row, col = i // 4, i % 4
+            im = axes[row, col].imshow(batch[i].squeeze(), cmap='gray')
+            axes[row, col].axis('off')
+        
+        # Add a single colorbar for the entire grid
+        plt.tight_layout()
+        plt.show()
+
+# %%
+# Langevin sampling from uniform prior
+n = 6
+m = 6
+batch = jax.random.uniform(rng, (n*m,28,28,1))
+num_steps = 500
+step_size = 0.001
+ts = jnp.linspace(0, num_steps*step_size, num_steps)
+for (ti,t) in tqdm(enumerate(ts)):
+    step_rng, rng = jax.random.split(rng)
+    s = model.apply(params, batch, jnp.zeros(batch.shape[0])+1e-3)
+    batch += step_size * s / 2
+    batch += jnp.sqrt(step_size) * jax.random.normal(step_rng, batch.shape)
+    if ti % 50 == 0:
+        fig, axes = plt.subplots(n, m, figsize=(10, 10))
+        plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Reduce space between subplots
+        for i in range(min(n*m, batch.shape[0])):
+            row, col = i // n, i % m
             im = axes[row, col].imshow(batch[i].squeeze(), cmap='gray')
             axes[row, col].axis('off')
         
