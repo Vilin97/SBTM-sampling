@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import array
 import functools as ft
 import gzip
@@ -223,9 +224,9 @@ def main(
 
     total_value = 0
     total_size = 0
-    for step, data in zip(
+    for step, data in tqdm(zip(
         range(num_steps), dataloader(data, batch_size, key=loader_key)
-    ):
+    ), total=num_steps, desc="Training", unit="step"):
         value, model, train_key, opt_state = make_step(
             model, weight, int_beta, data, t1, train_key, opt_state, opt.update
         )
@@ -235,6 +236,7 @@ def main(
             print(f"Step={step} Loss={total_value / total_size}")
             total_value = 0
             total_size = 0
+            # TODO: save checkpoint
 
     sample_key = jr.split(sample_key, sample_size**2)
     sample_fn = ft.partial(single_sample_fn, model, int_beta, data_shape, dt0, t1)
