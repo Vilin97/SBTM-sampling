@@ -242,12 +242,11 @@ def get_train_step_fn(model, marginal_prob_std):
         return loss, state.apply_gradients(grads=grad)
     return step_fn
 
-
 # %%
 # Define dataset
 preprocessing = "scaled"   
 
-n_epochs = 151       
+n_epochs = 2000
 batch_size = 256    
 lr = 1e-4           
 
@@ -279,7 +278,6 @@ elif preprocessing == "scaled":
 elif preprocessing is None:
     pass
 data = jnp.transpose(a=data, axes=(0, 2, 3, 1))
-data = data #+ 1e-4 * jax.random.normal(rng, data.shape)
 
 optimizer = optax.adamw(learning_rate=lr)
 train_state_ = train_state.TrainState.create(
@@ -342,7 +340,7 @@ for x, sx in zip(batch, s):
     
     # Plot score
     im1 = axes[1].imshow(sx.squeeze(), cmap='gray')
-    axes[1].set_title('Score s(x/0.01)')
+    axes[1].set_title('Score s(x)')
     axes[1].axis('off')
     fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
     
@@ -352,12 +350,13 @@ for x, sx in zip(batch, s):
 #%%
 # diffusion sample
 batch = jax.random.normal(rng, (16, 28, 28, 1))
-num_steps = 500
-step_size = 1/num_steps
+num_steps = 200
+step_size = 100/num_steps
 tis = jnp.linspace(1.0, 1e-3, num_steps)
 
 for (ti,t) in tqdm(enumerate(tis)):
     step_rng, rng = jax.random.split(rng)
+    print(f"{t=}")
     s = model.apply(params, batch, jnp.ones(batch.shape[0])*t)
     batch += step_size * s / 2
     batch += jnp.sqrt(step_size) * jax.random.normal(step_rng, batch.shape)
@@ -386,7 +385,7 @@ for (ti,t) in tqdm(enumerate(ts)):
     s = model.apply(params, batch, jnp.zeros(batch.shape[0])+1e-3)
     batch += step_size * s / 2
     batch += jnp.sqrt(step_size) * jax.random.normal(step_rng, batch.shape)
-    if ti % 50 == 0:
+    if ti % 20 == 0:
         fig, axes = plt.subplots(n, m, figsize=(10, 10))
         plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Reduce space between subplots
         for i in range(min(n*m, batch.shape[0])):
