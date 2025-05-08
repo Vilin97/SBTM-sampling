@@ -4,7 +4,7 @@
 /reports/*
 /plots
 
-
+sbtm-env/
 *.png
 
 # pycharm specific files
