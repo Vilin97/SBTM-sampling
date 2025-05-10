@@ -10,7 +10,7 @@ from typing import Any, Tuple
 import functools
 import jax
 from flax.training import checkpoints
-import tqdm
+from tqdm import tqdm
 import optax
 # import flax.training.train_state as train_state
 import matplotlib.pyplot as plt
@@ -163,17 +163,7 @@ optimizer = optax.adam(learning_rate=0.001)
 
 train_state = checkpoints.restore_checkpoint(ROOT_FOLDER + "/checkpoint_750", target=None, step=None)
 
-
 params = train_state["params"]
-
-
-def neg_score_fn(x, score_model, params, t):
-    t = jnp.ones(x.shape[0],) * t
-    return -score_model.apply(params, x, t)
-
-
-F = functools.partial(neg_score_fn, score_model=score_model, params=params, t=0.001)
-
 
 def target_score(x):
     """Computes the score of the target distribution.
@@ -183,9 +173,8 @@ def target_score(x):
     """
     x = x.reshape((x.shape[0], 28, 28, 1))
     t = jnp.ones(x.shape[0],) * 0.001
-    score_val = score_model.apply(params, x, t).reshape(x.shape[0], 28 * 28)
+    score_val = score_model.apply(params, x, t)
     return score_val
-
 
 # %%
 # Optimization
@@ -194,108 +183,37 @@ sample_batch_size = 128
 samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
 # samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
-# samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1), minval=-0.42407128, maxval=2.821526)
-for i in range(81):
-    if i % 20 == 0:
-        print(i)
-        result = gallery(samples[:12])
-        plt.imshow(result)
-        plt.show()
-    # score = score_fn(score_model, params, samples, time)
-    samples = samples - 0.001 * F(samples)
-
-# %%
-# Visualization
-
-x_grid_ula_uniform = einops.rearrange(
-    samples[:100, ..., 0],
-    "(n1 n2) (h) (w) -> (n1 h) (n2 w)",
-    n1=10, n2=10, h=28, w=28
-)
-plt.axis("off")
-plt.imshow(x_grid_ula_uniform, cmap="Greys")
-
-# %%
-# Vanilla Langevin Sampling
-sample_batch_size = 100  # 100
-n_iter = 300
-
-# Initialization plays a big role
-# Uniform
-# samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
-# # Gaussian
-# samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1))
-# Dirac
-# samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
-samples = jnp.zeros((sample_batch_size, 28, 28, 1))
-
-
-time = jnp.ones((sample_batch_size, ))
-tau = 1e-3
-temperature = 1
-time = jnp.ones((sample_batch_size, )) * 0.001
-for i in range(n_iter):
-    if i % 20 == 0:
-        print(i)
-        result = gallery(samples[:12])
-        plt.imshow(result)
-        plt.show()
-    step_rng, rng = jax.random.split(rng)
-    samples = samples - tau * F(samples) / temperature + jnp.sqrt(2 * tau) * jax.random.normal(step_rng, samples.shape)
-
-#%%
-# TODO: need to adjust the time step to be smaller when t is close to 0, otherwise get NaNs
-# Omar's dilation path
-sample_batch_size = 100  # 100
-n_iter = 300
-samples = jnp.zeros((sample_batch_size, 28, 28, 1))
-
-time = jnp.ones((sample_batch_size, ))
-tau = 1e-3
-temperature = 1
-time = jnp.ones((sample_batch_size, )) * 0.001
-for i in range(n_iter):
-    t = i / n_iter
-    if i % 20 == 0:
-        print(i)
-        result = gallery(samples[:12])
-        plt.imshow(result)
-        plt.show()
-    step_rng, rng = jax.random.split(rng)
-    samples = samples - tau * t * F(samples / t) / temperature + jnp.sqrt(2 * tau) * jax.random.normal(step_rng, samples.shape)
-
-#%%
-# NOTE: using my own Langevin sampler
-n = 6
-m = 6
-batch = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
-num_steps = 500
 step_size = 0.001
-ts = jnp.linspace(0, num_steps*step_size, num_steps)
-for (ti,t) in tqdm.tqdm(enumerate(ts)):
-    step_rng, rng = jax.random.split(rng)
-    s = score_model.apply(params, batch, jnp.zeros(batch.shape[0])+1e-3)
-    batch += step_size * s / 2
-    batch += jnp.sqrt(step_size) * jax.random.normal(step_rng, batch.shape)
-    if ti % 20 == 0:
-        fig, axes = plt.subplots(n, m, figsize=(10, 10))
-        plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Reduce space between subplots
-        for i in range(min(n*m, batch.shape[0])):
-            row, col = i // n, i % m
-            im = axes[row, col].imshow(batch[i].squeeze(), cmap='gray')
-            axes[row, col].axis('off')
-        
-        # Add a single colorbar for the entire grid
-        plt.tight_layout()
+num_steps = 81
+
+for i in tqdm(range(num_steps)):
+    samples = samples + step_size * target_score(samples)
+    if i % 20 == 0:
+        print(i)
+        result = gallery(samples[:12])
+        plt.imshow(result)
         plt.show()
 
-# %%
-# Visualization
+plt.imshow(gallery(samples, 16))
 
-x_grid_ula_uniform = einops.rearrange(
-    samples[:, ..., 0],
-    "(n1 n2) (h) (w) -> (n1 h) (n2 w)",
-    n1=10, n2=10, h=28, w=28
-)
-plt.axis("off")
-plt.imshow(x_grid_ula_uniform, cmap="Greys")
+#%%
+# Langevin
+sample_batch_size = 128
+# samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
+samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
+# samples = jnp.zeros((sample_batch_size, 28, 28, 1))
+
+step_size = 0.001
+num_steps = 81
+
+for i in tqdm(range(num_steps)):
+    step_rng, rng = jax.random.split(rng)
+    samples = samples + step_size * target_score(samples)
+    samples += jnp.sqrt(2 * step_size) * jax.random.normal(step_rng, samples.shape)
+    if i % 20 == 0:
+        print(i)
+        result = gallery(samples[:12])
+        plt.imshow(result)
+        plt.show()
+
+plt.imshow(gallery(samples, 16))
