@@ -226,3 +226,93 @@ plt.imshow(gallery(samples, 16))
 # 5. PROFIT.
 
 #%%
+class ScoreNetStatic(nn.Module):
+    """U-Net–style score model without time conditioning."""
+    channels: Tuple[int] = (32, 64, 128, 256)
+
+    @nn.compact
+    def __call__(self, x):
+        act = nn.swish
+
+        # Encoder
+        h1 = act(nn.GroupNorm(4)(nn.Conv(self.channels[0], (3, 3), padding='VALID', use_bias=False)(x)))
+        h2 = act(nn.GroupNorm()(nn.Conv(self.channels[1], (3, 3), (2, 2), padding='VALID', use_bias=False)(h1)))
+        h3 = act(nn.GroupNorm()(nn.Conv(self.channels[2], (3, 3), (2, 2), padding='VALID', use_bias=False)(h2)))
+        h4 = act(nn.GroupNorm()(nn.Conv(self.channels[3], (3, 3), (2, 2), padding='VALID', use_bias=False)(h3)))
+
+        # Decoder
+        h = act(nn.GroupNorm()(nn.Conv(self.channels[2], (3, 3), padding=((2, 2), (2, 2)),
+                                      input_dilation=(2, 2), use_bias=False)(h4)))
+        h = act(nn.GroupNorm()(nn.Conv(self.channels[1], (3, 3), padding=((2, 3), (2, 3)),
+                                      input_dilation=(2, 2), use_bias=False)(
+            jnp.concatenate([h, h3], axis=-1))))
+        h = act(nn.GroupNorm()(nn.Conv(self.channels[0], (3, 3), padding=((2, 3), (2, 3)),
+                                      input_dilation=(2, 2), use_bias=False)(
+            jnp.concatenate([h, h2], axis=-1))))
+        out = nn.Conv(1, (3, 3), padding=((2, 2), (2, 2)))(
+            jnp.concatenate([h, h1], axis=-1))
+
+        return out
+
+#%%
+rng = jax.random.PRNGKey(1)
+sample_batch_size = 128
+samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
+
+#%%
+# Initialize ScoreNetStatic and evaluate on samples
+s = ScoreNetStatic()
+static_params = s.init(rng, samples)
+static_out = s.apply(static_params, samples)
+print("ScoreNetStatic output shape:", static_out.shape)
+
+# %%
+import jax, jax.numpy as jnp
+from functools import partial
+import time
+
+def ism_loss(params, apply_fn, particles, rng, *, n_hutch=4):
+    """Jitted Hyvärinen loss with efficient Hutchinson trick."""
+    B = particles.shape[0]                         # batch size
+
+    def per_sample(x, key):
+        # --------------- forward pass & linearisation ---------------
+        score, pullback = jax.linearize(
+            lambda y: apply_fn(params, y), x)      # score = s_theta(x)
+
+        # --------------- Hutchinson divergence ----------------------
+        subkeys = jax.random.split(key, n_hutch)
+        v = jax.vmap(lambda k: jax.random.rademacher(k, x.shape, dtype=x.dtype))(subkeys)  # (n_hutch, ...)
+        v_flat = v.reshape((n_hutch, -1))  # (n_hutch, d)
+        jvp = jax.vmap(pullback)(v)            # (n_hutch, ...)
+        jvp_flat = jvp.reshape((n_hutch, -1))  # (n_hutch, d)
+        div = jnp.einsum('nd,nd->n', jvp_flat, v_flat).mean()  # scalar
+
+        return 0.5 * jnp.sum(score**2) + div       # per‑sample loss
+
+    keys  = jax.random.split(rng, B)               # (B, 2)
+    loss  = jax.vmap(per_sample)(particles, keys)  # (B,)
+    return loss.mean()                             # scalar
+
+apply_fn   = s.apply
+key        = jax.random.PRNGKey(0)
+
+# ───────────────────────── compile once ────────────────────────────
+ism_loss_jit = jax.jit(partial(ism_loss, n_hutch=1), static_argnames='apply_fn')
+
+
+#%%
+
+start1 = time.time()
+loss_value1 = ism_loss_jit(static_params, s.apply, samples, jax.random.PRNGKey(0))
+end1 = time.time()
+
+start2 = time.time()
+loss_value2 = ism_loss(static_params, apply_fn, samples, key, n_hutch=1)
+end2 = time.time()
+
+print("ISM loss (jit):", loss_value1, "Time:", end1 - start1)
+print("ISM loss (non-jit):", loss_value2, "Time:", end2 - start2)
+print("ISM loss:", loss_value2)
+
+# %%
