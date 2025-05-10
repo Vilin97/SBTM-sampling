@@ -196,9 +196,10 @@ plt.imshow(gallery(samples, 16))
 
 #%%
 # Langevin
+rng = jax.random.PRNGKey(1)
 sample_batch_size = 128
-# samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
-samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
+samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
+# samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
 # samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
 step_size = 0.001
@@ -215,3 +216,13 @@ for i in tqdm(range(num_steps)):
         plt.show()
 
 plt.imshow(gallery(samples, 16))
+
+#%%
+# Plan for SBTM:
+# 1. Take the initial model to be of the same architecture as the score model.
+# 2. Train it on the score of the initial distribution -- either a Gaussian or a uniform distribution.
+# 3. Change stepping of Langevin to use the new model instead of the noise.
+# 4. Also, train the model on the implicit score match ing loss at every step.
+# 5. PROFIT.
+
+#%%
