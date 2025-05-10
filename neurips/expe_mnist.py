@@ -271,48 +271,72 @@ import jax, jax.numpy as jnp
 from functools import partial
 import time
 
+def get_div_fn(fn):
+  """Create the divergence function of fn using the Hutchinson-Skilling trace estimator."""
+
+  def div_fn(x, t, eps):
+    grad_fn = lambda data: jnp.sum(fn(data, t) * eps)
+    grad_fn_eps = jax.grad(grad_fn)(x)
+    return jnp.sum(grad_fn_eps * eps, axis=tuple(range(1, len(x.shape))))
+
+  return div_fn
+
+# ---------------------------------------------------------------------
+# 1.  Build a divergence function tied to *apply_fn(params, x)*.
+#    get_div_fn expects     fn(x, t)         so we curry params into it
+#    and ignore the dummy   t.
+# ---------------------------------------------------------------------
+def make_div_fn(params, apply_fn):
+    score_fn = lambda x, _t: apply_fn(params, x)        # _t is unused
+    return get_div_fn(score_fn)                         # returns div_fn(x, t, eps)
+
+# ---------------------------------------------------------------------
+# 2.  Jitted ISM loss using that div_fn and n_hutch Hutchinson probes
+# ---------------------------------------------------------------------
 def ism_loss(params, apply_fn, particles, rng, *, n_hutch=4):
-    """Jitted Hyvärinen loss with efficient Hutchinson trick."""
-    B = particles.shape[0]                         # batch size
+    B   = particles.shape[0]
+    div = make_div_fn(params, apply_fn)                 # closes over params
 
-    def per_sample(x, key):
-        # --------------- forward pass & linearisation ---------------
-        score, pullback = jax.linearize(
-            lambda y: apply_fn(params, y), x)      # score = s_theta(x)
+    # keys: (B, n_hutch, 2)  for per-sample, per-probe randomness
+    keys = jax.random.split(rng, B * n_hutch).reshape(B, n_hutch, 2)
 
-        # --------------- Hutchinson divergence ----------------------
-        subkeys = jax.random.split(key, n_hutch)
-        v = jax.vmap(lambda k: jax.random.rademacher(k, x.shape, dtype=x.dtype))(subkeys)  # (n_hutch, ...)
-        v_flat = v.reshape((n_hutch, -1))  # (n_hutch, d)
-        jvp = jax.vmap(pullback)(v)            # (n_hutch, ...)
-        jvp_flat = jvp.reshape((n_hutch, -1))  # (n_hutch, d)
-        div = jnp.einsum('nd,nd->n', jvp_flat, v_flat).mean()  # scalar
+    def per_sample(x, ks):
+        # --- Hutchinson divergence (avg over n_hutch) ----------------
+        def one_probe(k):
+            eps = jax.random.rademacher(k, x.shape, dtype=x.dtype)
+            return div(x, None, eps)                    # t=None
+        div_est = jax.vmap(one_probe)(ks).mean()
 
-        return 0.5 * jnp.sum(score**2) + div       # per‑sample loss
+        s = apply_fn(params, x)                         # score
+        return 0.5 * jnp.sum(s**2) + div_est           # per-sample loss
 
-    keys  = jax.random.split(rng, B)               # (B, 2)
-    loss  = jax.vmap(per_sample)(particles, keys)  # (B,)
-    return loss.mean()                             # scalar
+    loss = jax.vmap(per_sample)(particles, keys).mean()
+    return loss
 
-apply_fn   = s.apply
-key        = jax.random.PRNGKey(0)
+# ---------------------------------------------------------------------
+# 3.  JIT-compile once, use inside your training loop
+# ---------------------------------------------------------------------
+fast_ism_loss = jax.jit(partial(ism_loss, n_hutch=1), static_argnames='apply_fn')
 
-# ───────────────────────── compile once ────────────────────────────
-ism_loss_jit = jax.jit(partial(ism_loss, n_hutch=1), static_argnames='apply_fn')
+rng        = jax.random.PRNGKey(0)
+loss_value = fast_ism_loss(static_params, s.apply, samples, rng)
+print("loss:", loss_value)
 
+# If you need gradients:
+loss_val, grads = jax.value_and_grad(fast_ism_loss)(
+        static_params, s.apply, samples, rng)
 
 #%%
 
 start1 = time.time()
-loss_value1 = ism_loss_jit(static_params, s.apply, samples, jax.random.PRNGKey(0))
+loss_value1 = fast_ism_loss(static_params, s.apply, samples, jax.random.PRNGKey(0)).block_until_ready()
 end1 = time.time()
+print("Time taken for first call:", end1 - start1)
 
 start2 = time.time()
-loss_value2 = ism_loss(static_params, apply_fn, samples, key, n_hutch=1)
+loss_val2, grads2 = jax.value_and_grad(fast_ism_loss)(
+    static_params, s.apply, samples, jax.random.PRNGKey(0))
 end2 = time.time()
-
-print("ISM loss (jit):", loss_value1, "Time:", end1 - start1)
-print("ISM loss (non-jit):", loss_value2, "Time:", end2 - start2)
-print("ISM loss:", loss_value2)
+print("Time taken for value_and_grad call:", end2 - start2)
 
 # %%
