@@ -328,6 +328,14 @@ def run_fast_ism_gd(
     return params, opt_state, losses
 #%%
 # SBTM
+current_score_model = ScoreNetStatic()
+# static_params = current_score_model.init(rng, samples)
+checkpoint = checkpoints.restore_checkpoint(ROOT_FOLDER + "/score_model/final/", target=None, step=None)
+static_params = checkpoint["params"]
+optimizer = optax.adamw(1e-3)
+opt_state = optimizer.init(static_params)
+
+#%%
 rng = jax.random.PRNGKey(1)
 sample_batch_size = 128
 samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
@@ -336,15 +344,10 @@ samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
 
 step_size = 0.001
 num_steps = 21
-
-current_score = ScoreNetStatic()
-static_params = current_score.init(rng, samples)
-optimizer = optax.adamw(1e-3)
-opt_state = optimizer.init(static_params)
 for i in tqdm(range(num_steps)):
     step_rng, rng = jax.random.split(rng)
-    samples = samples + step_size * target_score(samples) - current_score.apply(static_params, samples)
-    static_params, opt_state, losses = run_fast_ism_gd(static_params, current_score.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=10, batch_size=64)
+    samples = samples + step_size * (target_score(samples) - current_score_model.apply(static_params, samples))
+    static_params, opt_state, losses = run_fast_ism_gd(static_params, current_score_model.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=10, batch_size=64, verbose=False)
     if i % 1 == 0:
         print(i)
         result = gallery(samples[:12])
