@@ -288,14 +288,14 @@ def make_fast_ism_loss(n_hutch: int = 4):
 fast_ism_loss = make_fast_ism_loss(n_hutch=20)
 
 #%%
-def run_fast_ism_gd(
+def train(
     params,
     apply_fn,
     samples,
     rng,
     optimizer,
     opt_state,
-    fast_ism_loss,
+    loss_fn,
     epochs=10,
     batch_size=32,
     verbose=True
@@ -317,7 +317,7 @@ def run_fast_ism_gd(
             batch = samples_shuffled[batch_start:batch_end]
             # Use a different rng for each batch
             batch_step_rng = jax.random.fold_in(batch_rng, epoch * num_batches + i)
-            loss, grads = jax.value_and_grad(fast_ism_loss)(params, apply_fn, batch, batch_step_rng)
+            loss, grads = jax.value_and_grad(loss_fn)(params, apply_fn, batch, batch_step_rng)
             updates, opt_state = optimizer.update(grads, opt_state, params)
             params = optax.apply_updates(params, updates)
             batch_losses.append(loss)
@@ -329,9 +329,7 @@ def run_fast_ism_gd(
 #%%
 # SBTM
 current_score_model = ScoreNetStatic()
-# static_params = current_score_model.init(rng, samples)
-checkpoint = checkpoints.restore_checkpoint(ROOT_FOLDER + "/score_model/final/", target=None, step=None)
-static_params = checkpoint["params"]
+static_params = current_score_model.init(rng, samples)
 optimizer = optax.adamw(1e-3)
 opt_state = optimizer.init(static_params)
 
@@ -342,12 +340,51 @@ samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
 # samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
 # samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
+# Do a few steps of gradient descent to get current_score_model to output 0 for samples
+zero_target = jnp.zeros_like(samples)
+gd_epochs = 20
+
+def mse_loss(params, apply_fn, x, _rng):
+    pred = apply_fn(params, x)
+    return jnp.mean((pred - zero_target[:x.shape[0]]) ** 2)
+
+plt.imshow(gallery(current_score_model.apply(static_params, samples[:12])))
+plt.show()
+
+# Add 10 levels of noise to samples and concatenate them
+num_levels = 10
+noise_levels = jnp.linspace(0.01, 0.1, num_levels)
+samples_aug = jnp.concatenate([
+    samples + jax.random.normal(jax.random.PRNGKey(i), samples.shape) * noise_levels[i]
+    for i in range(num_levels)
+], axis=0)
+
+static_params, opt_state, loss_history = train(
+    static_params,
+    current_score_model.apply,
+    samples,
+    rng,
+    optimizer,
+    opt_state,
+    mse_loss,
+    epochs=gd_epochs,
+    batch_size=sample_batch_size,
+    verbose=False
+)
+
+plt.imshow(gallery(current_score_model.apply(static_params, samples[:12])))
+plt.show()
+plt.plot(loss_history)
+plt.show()
+
+#%%
+# SBTM sampling
 step_size = 0.001
 num_steps = 21
 for i in tqdm(range(num_steps)):
     step_rng, rng = jax.random.split(rng)
     samples = samples + step_size * (target_score(samples) - current_score_model.apply(static_params, samples))
-    static_params, opt_state, losses = run_fast_ism_gd(static_params, current_score_model.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=10, batch_size=64, verbose=False)
+    static_params, opt_state, losses = train(static_params, current_score_model.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=10, batch_size=64, verbose=False)
     if i % 1 == 0:
         print(i)
         result = gallery(samples[:12])
@@ -355,4 +392,7 @@ for i in tqdm(range(num_steps)):
         plt.show()
 
 plt.imshow(gallery(samples, 16))
-# %%
+
+# what are the knobs and toggles:
+# step_size, num_steps, batch_size, epochs, sample_batch_size
+# comapre current_score at the end of the simulation with the ground truth (target_score)
