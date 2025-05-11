@@ -176,17 +176,18 @@ def target_score(x):
 
 # %%
 # Optimization
+rng = jax.random.PRNGKey(1)
 sample_batch_size = 128
 # samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
 samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
 # samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
 step_size = 0.001
-num_steps = 81
+num_steps = 41
 
 for i in tqdm(range(num_steps)):
     samples = samples + step_size * target_score(samples)
-    if i % 20 == 0:
+    if i % 10 == 0:
         print(i)
         result = gallery(samples[:12])
         plt.imshow(result)
@@ -203,7 +204,7 @@ samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
 # samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
 step_size = 0.001
-num_steps = 81
+num_steps = 41
 
 for i in tqdm(range(num_steps)):
     step_rng, rng = jax.random.split(rng)
@@ -254,22 +255,9 @@ class ScoreNetStatic(nn.Module):
 
         return out
 
-#%%
-rng = jax.random.PRNGKey(1)
-sample_batch_size = 128
-samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
-
-#%%
-# Initialize ScoreNetStatic and evaluate on samples
-s = ScoreNetStatic()
-static_params = s.init(rng, samples)
-static_out = s.apply(static_params, samples)
-print("ScoreNetStatic output shape:", static_out.shape)
-
 # %%
 import jax, jax.numpy as jnp
 from functools import partial
-import time
 
 def get_div_fn(fn):
     def div_fn(x, eps):
@@ -297,58 +285,71 @@ def make_fast_ism_loss(n_hutch: int = 4):
 
     return _loss
 
-
 fast_ism_loss = make_fast_ism_loss(n_hutch=20)
-rng           = jax.random.PRNGKey(0)
-
-loss_value = fast_ism_loss(static_params, s.apply, samples, rng)
-print("fast ISM loss:", loss_value)
-
-# %%
-import jax, jax.numpy as jnp
-
-def exact_ism_loss(params, apply_fn, particles):
-    """
-    True Hyvärinen loss: ½‖s(x)‖² + div s(x) with exact Jacobian trace.
-    O(B·d²) memory – use only for tiny d (e.g. flattened 2×2 images).
-    """
-    def per_sample(x):
-        x_flat = x.reshape(-1)                       # (d,)
-        def score_flat(y_flat):
-            y = y_flat.reshape(x.shape)
-            return apply_fn(params, y).reshape(-1)   # (d,)
-        s_flat = score_flat(x_flat)
-        J      = jax.jacrev(score_flat)(x_flat)      # (d, d)
-        div    = jnp.trace(J)
-        return 0.5 * jnp.dot(s_flat, s_flat) + div
-    return jax.vmap(per_sample)(particles).mean()
 
 #%%
-exact   = exact_ism_loss(static_params, s.apply, samples[:1])   # small batch!
-fast    = fast_ism_loss(static_params, s.apply, samples[:1],
-                    jax.random.PRNGKey(0))
+def run_fast_ism_gd(
+    params,
+    apply_fn,
+    samples,
+    rng,
+    optimizer,
+    opt_state,
+    fast_ism_loss,
+    epochs=10,
+    batch_size=32,
+    verbose=True
+):
+    N = samples.shape[0]
+    losses = []
 
-print("exact :", exact)
-print("fast  :", fast)
+    for epoch in range(epochs):
+        # Shuffle samples
+        rng, shuffle_rng, batch_rng = jax.random.split(rng, 3)
+        idx = jax.random.permutation(shuffle_rng, N)
+        samples_shuffled = samples[idx]
+        batch_losses = []
+        num_batches = (N + batch_size - 1) // batch_size
 
-# Compare gradients
-exact_loss_fn = lambda p: exact_ism_loss(p, s.apply, samples[:1])
-fast_loss_fn  = lambda p: fast_ism_loss(p, s.apply, samples[:1], jax.random.PRNGKey(0))
+        for i in range(num_batches):
+            batch_start = i * batch_size
+            batch_end = min(batch_start + batch_size, N)
+            batch = samples_shuffled[batch_start:batch_end]
+            # Use a different rng for each batch
+            batch_step_rng = jax.random.fold_in(batch_rng, epoch * num_batches + i)
+            loss, grads = jax.value_and_grad(fast_ism_loss)(params, apply_fn, batch, batch_step_rng)
+            updates, opt_state = optimizer.update(grads, opt_state, params)
+            params = optax.apply_updates(params, updates)
+            batch_losses.append(loss)
+        avg_loss = np.mean(jax.device_get(jnp.array(batch_losses)))
+        losses.append(avg_loss)
+        if verbose:
+            print(f"Epoch {epoch+1}/{epochs}, avg loss: {avg_loss:.6f}")
+    return params, opt_state, losses
+#%%
+# SBTM
+rng = jax.random.PRNGKey(1)
+sample_batch_size = 128
+samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
+# samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
+# samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
-start = time.time()
-exact_grads = jax.grad(exact_loss_fn)(static_params)
-exact_time = time.time() - start
+step_size = 0.001
+num_steps = 21
 
-start = time.time()
-fast_grads  = jax.grad(fast_loss_fn)(static_params)
-fast_time = time.time() - start
+current_score = ScoreNetStatic()
+static_params = current_score.init(rng, samples)
+optimizer = optax.adamw(1e-3)
+opt_state = optimizer.init(static_params)
+for i in tqdm(range(num_steps)):
+    step_rng, rng = jax.random.split(rng)
+    samples = samples + step_size * target_score(samples) - current_score.apply(static_params, samples)
+    static_params, opt_state, losses = run_fast_ism_gd(static_params, current_score.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=10, batch_size=64)
+    if i % 1 == 0:
+        print(i)
+        result = gallery(samples[:12])
+        plt.imshow(result)
+        plt.show()
 
-print(f"exact grad time: {exact_time:.4f} s")
-print(f"fast  grad time: {fast_time:.4f} s")
-
-# For brevity, print the L2 norm of the gradients for the first parameter
-def grad_norms(grads):
-    return {k: jnp.linalg.norm(v) for k, v in jax.tree_util.tree_leaves(grads)}
-
-print("exact grad norm:", jax.tree_util.tree_map(lambda x: jnp.linalg.norm(x), exact_grads))
-print("fast  grad norm:", jax.tree_util.tree_map(lambda x: jnp.linalg.norm(x), fast_grads))
+plt.imshow(gallery(samples, 16))
+# %%
