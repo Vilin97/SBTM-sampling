@@ -272,71 +272,83 @@ from functools import partial
 import time
 
 def get_div_fn(fn):
-  """Create the divergence function of fn using the Hutchinson-Skilling trace estimator."""
+    def div_fn(x, eps):
+        g = lambda y: jnp.vdot(fn(y), eps)        # scalar
+        grad = jax.grad(g)(x)                     # Jᵀ eps
+        return jnp.vdot(grad, eps)                # epsᵀJeps
+    return div_fn
 
-  def div_fn(x, t, eps):
-    grad_fn = lambda data: jnp.sum(fn(data, t) * eps)
-    grad_fn_eps = jax.grad(grad_fn)(x)
-    return jnp.sum(grad_fn_eps * eps, axis=tuple(range(1, len(x.shape))))
+def make_fast_ism_loss(n_hutch: int = 4):
+    @partial(jax.jit, static_argnums=(1,))        # 1 = apply_fn  (static)
+    def _loss(params, apply_fn, particles, rng):
+        B     = particles.shape[0]
+        keys  = jax.random.split(rng, B * n_hutch).reshape(B, n_hutch, 2)
+        div_f = get_div_fn(lambda y: apply_fn(params, y))
 
-  return div_fn
+        def per_sample(x, ks):
+            def one_probe(k):
+                eps = jax.random.rademacher(k, x.shape, dtype=x.dtype)
+                return div_f(x, eps)
+            div_est = jax.vmap(one_probe)(ks).mean(0)
+            s       = apply_fn(params, x)
+            return 0.5 * jnp.sum(s**2) + div_est
 
-# ---------------------------------------------------------------------
-# 1.  Build a divergence function tied to *apply_fn(params, x)*.
-#    get_div_fn expects     fn(x, t)         so we curry params into it
-#    and ignore the dummy   t.
-# ---------------------------------------------------------------------
-def make_div_fn(params, apply_fn):
-    score_fn = lambda x, _t: apply_fn(params, x)        # _t is unused
-    return get_div_fn(score_fn)                         # returns div_fn(x, t, eps)
+        return jax.vmap(per_sample)(particles, keys).mean()
 
-# ---------------------------------------------------------------------
-# 2.  Jitted ISM loss using that div_fn and n_hutch Hutchinson probes
-# ---------------------------------------------------------------------
-def ism_loss(params, apply_fn, particles, rng, *, n_hutch=4):
-    B   = particles.shape[0]
-    div = make_div_fn(params, apply_fn)                 # closes over params
+    return _loss
 
-    # keys: (B, n_hutch, 2)  for per-sample, per-probe randomness
-    keys = jax.random.split(rng, B * n_hutch).reshape(B, n_hutch, 2)
 
-    def per_sample(x, ks):
-        # --- Hutchinson divergence (avg over n_hutch) ----------------
-        def one_probe(k):
-            eps = jax.random.rademacher(k, x.shape, dtype=x.dtype)
-            return div(x, None, eps)                    # t=None
-        div_est = jax.vmap(one_probe)(ks).mean()
+fast_ism_loss = make_fast_ism_loss(n_hutch=20)
+rng           = jax.random.PRNGKey(0)
 
-        s = apply_fn(params, x)                         # score
-        return 0.5 * jnp.sum(s**2) + div_est           # per-sample loss
-
-    loss = jax.vmap(per_sample)(particles, keys).mean()
-    return loss
-
-# ---------------------------------------------------------------------
-# 3.  JIT-compile once, use inside your training loop
-# ---------------------------------------------------------------------
-fast_ism_loss = jax.jit(partial(ism_loss, n_hutch=1), static_argnames='apply_fn')
-
-rng        = jax.random.PRNGKey(0)
 loss_value = fast_ism_loss(static_params, s.apply, samples, rng)
-print("loss:", loss_value)
-
-# If you need gradients:
-loss_val, grads = jax.value_and_grad(fast_ism_loss)(
-        static_params, s.apply, samples, rng)
-
-#%%
-
-start1 = time.time()
-loss_value1 = fast_ism_loss(static_params, s.apply, samples, jax.random.PRNGKey(0)).block_until_ready()
-end1 = time.time()
-print("Time taken for first call:", end1 - start1)
-
-start2 = time.time()
-loss_val2, grads2 = jax.value_and_grad(fast_ism_loss)(
-    static_params, s.apply, samples, jax.random.PRNGKey(0))
-end2 = time.time()
-print("Time taken for value_and_grad call:", end2 - start2)
+print("fast ISM loss:", loss_value)
 
 # %%
+import jax, jax.numpy as jnp
+
+def exact_ism_loss(params, apply_fn, particles):
+    """
+    True Hyvärinen loss: ½‖s(x)‖² + div s(x) with exact Jacobian trace.
+    O(B·d²) memory – use only for tiny d (e.g. flattened 2×2 images).
+    """
+    def per_sample(x):
+        x_flat = x.reshape(-1)                       # (d,)
+        def score_flat(y_flat):
+            y = y_flat.reshape(x.shape)
+            return apply_fn(params, y).reshape(-1)   # (d,)
+        s_flat = score_flat(x_flat)
+        J      = jax.jacrev(score_flat)(x_flat)      # (d, d)
+        div    = jnp.trace(J)
+        return 0.5 * jnp.dot(s_flat, s_flat) + div
+    return jax.vmap(per_sample)(particles).mean()
+
+#%%
+exact   = exact_ism_loss(static_params, s.apply, samples[:1])   # small batch!
+fast    = fast_ism_loss(static_params, s.apply, samples[:1],
+                    jax.random.PRNGKey(0))
+
+print("exact :", exact)
+print("fast  :", fast)
+
+# Compare gradients
+exact_loss_fn = lambda p: exact_ism_loss(p, s.apply, samples[:1])
+fast_loss_fn  = lambda p: fast_ism_loss(p, s.apply, samples[:1], jax.random.PRNGKey(0))
+
+start = time.time()
+exact_grads = jax.grad(exact_loss_fn)(static_params)
+exact_time = time.time() - start
+
+start = time.time()
+fast_grads  = jax.grad(fast_loss_fn)(static_params)
+fast_time = time.time() - start
+
+print(f"exact grad time: {exact_time:.4f} s")
+print(f"fast  grad time: {fast_time:.4f} s")
+
+# For brevity, print the L2 norm of the gradients for the first parameter
+def grad_norms(grads):
+    return {k: jnp.linalg.norm(v) for k, v in jax.tree_util.tree_leaves(grads)}
+
+print("exact grad norm:", jax.tree_util.tree_map(lambda x: jnp.linalg.norm(x), exact_grads))
+print("fast  grad norm:", jax.tree_util.tree_map(lambda x: jnp.linalg.norm(x), fast_grads))
