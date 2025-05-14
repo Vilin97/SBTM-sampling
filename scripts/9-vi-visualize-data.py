@@ -8,17 +8,19 @@ import jax.random as jrandom
 from flax import nnx
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scipy.stats import gaussian_kde
-import numpy as np
+# from scipy.stats import gaussian_kde
+from jax.scipy.stats import gaussian_kde
 
 from sbtm import density, plots, kernel, losses, models, sampler, stats, distribution
+import pickle
+from tqdm import tqdm
 for module in [density, plots, kernel, losses, models, sampler, stats, distribution]:
     importlib.reload(module)
 
 # Set the memory fraction for JAX
 os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.9'
 # Set the GPU
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 #%%
 target_distributions = {
@@ -41,6 +43,214 @@ target_distributions = {
         weights=[1/16]*16),
     'circle': distribution.Circle(center=[4, 0], radius=1, noise=0.2)
 }
+
+#%%
+def compute_kl_divergence_integral(sample_f, sample_g, num_points=1000, eps=1e-10):
+    # Flatten to 1D
+    sample_f = sample_f.ravel()
+    sample_g = sample_g.ravel()
+    
+    # Create KDEs
+    f_kde = gaussian_kde(sample_f)
+    g_kde = gaussian_kde(sample_g)
+    
+    # Integration grid
+    xmin = jnp.minimum(jnp.min(sample_f), jnp.min(sample_g))
+    xmax = jnp.maximum(jnp.max(sample_f), jnp.max(sample_g))
+    x = jnp.linspace(xmin, xmax, num_points)
+    
+    # Evaluate KDEs
+    f_vals = f_kde.pdf(x)
+    g_vals = g_kde.pdf(x)
+    
+    # KL divergence via trapezoidal rule
+    kl = jnp.trapezoid(f_vals * jnp.log(f_vals / (g_vals + eps) + eps), x)
+    return kl
+
+def get_particles(example_name, method_name, annealing_name, step_size, max_steps, num_particles):
+    data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/{method_name}/{annealing_name}')
+    path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_{num_particles}.pkl')
+    with open(path, 'rb') as f:
+        log_data = pickle.load(f)
+    all_particles = jnp.array([log['particles'] for log in log_data['logs']])
+    return all_particles
+
+#%%
+step_size = 0.01
+max_steps = 1000
+
+kls = {}
+
+for example_name in tqdm(['gaussians_far', 'gaussians_near'], leave=False):
+    sample_g = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=10000)
+    for method_name in tqdm(['sde', 'sbtm', 'svgd'], leave=False, desc=f'{example_name}'):
+        for annealing_name in tqdm(['geometric', 'dilation', 'non-annealed'], leave=False, desc=f'{method_name}'):
+            for num_particles in tqdm([100, 300, 1000, 3000, 10000], leave=False, desc=f'{annealing_name}'):
+                samples_f = get_particles(example_name, method_name, annealing_name, step_size, max_steps, num_particles)
+                for i in tqdm(range(samples_f.shape[0]), leave=False, desc='time'):
+                    kl = compute_kl_divergence_integral(samples_f[i], sample_g)
+                    key = (example_name, method_name, annealing_name, num_particles, i)
+                    kls[key] = kl.item()
+                    if jnp.isnan(kls[key]):
+                        print(f"KL is nan for key: {key}")
+
+step_size = 0.002
+max_steps = 1250
+example_name = 'analytic'
+sample_g = target_distributions[example_name].sample(jrandom.PRNGKey(42), size=10000)
+for method_name in tqdm(['sde', 'sbtm', 'svgd'], leave=False, desc=f'{example_name}'):
+    for num_particles in tqdm([100, 300, 1000, 3000, 10000], leave=False, desc=f'{annealing_name}'):
+        data_dir = os.path.expanduser(f'~/SBTM-sampling/data/{example_name}/d_{1}/{method_name}/non-annealed')
+        path = os.path.join(data_dir, f'stepsize_{step_size}_numsteps_{max_steps}_particles_{num_particles}.pkl')
+        with open(path, 'rb') as f:
+            log_data = pickle.load(f)
+        samples_f = jnp.array([log['particles'] for log in log_data['logs']])
+        for i in tqdm(range(samples_f.shape[0]), leave=False, desc='time'):
+            kl = compute_kl_divergence_integral(samples_f[i], sample_g)
+            key = (example_name, method_name, annealing_name, num_particles, i)
+            kls[key] = kl
+            if jnp.isnan(kls[key]):
+                print(f"KL is nan for key: {key}")
+
+# Save KL divergences to file
+save_path = os.path.expanduser('~/SBTM-sampling/neurips/kl_divergences3.pkl')
+os.makedirs(os.path.dirname(save_path), exist_ok=True)
+with open(save_path, 'wb') as f:
+    pickle.dump(kls, f)
+print("saved")
+
+#%%
+# Load KL divergences from file
+save_path = os.path.expanduser('~/SBTM-sampling/neurips/kl_divergences3.pkl')
+with open(save_path, 'rb') as f:
+    kls = pickle.load(f)
+#%%
+# Settings
+examples = ['gaussians_far', 'gaussians_near']
+# method_names = ['sde', 'sbtm', 'svgd']
+# annealing_names = ['geometric', 'dilation', 'non-annealed']
+method_names = ['sde', 'sbtm']
+annealing_names = ['non-annealed']
+num_particles_list = [100, 300, 1000, 3000, 10000]
+
+# gaussians
+step_size = 0.01
+max_steps = 1000
+num_particles = 1000
+for example_name in ['gaussians_far', 'gaussians_near']:
+    plt.figure(figsize=(10/1.2, 6/1.2))
+    for method_name in method_names:
+        for annealing_name in annealing_names:
+            kl_vals = []
+            ts = []
+            for i in range(max_steps):
+                key = (example_name, method_name, annealing_name, num_particles, i)
+                if key in kls:
+                    kl_vals.append(kls[key])
+                    ts.append(i * step_size)
+            if kl_vals:
+                plt.plot(ts, kl_vals, label=f"{method_name}")
+    plt.yscale('log')
+    plt.xlabel("Time")
+    plt.ylabel("KL Divergence")
+    plt.title(f"{example_name}, n={num_particles}")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# analytic
+example_name = 'analytic'
+step_size = 0.002
+max_steps = 600
+
+def K(t):
+    return 1 - jnp.exp(-2 * t)
+t0 = 0.1
+
+ts = jnp.arange(max_steps) * step_size
+ground_truth_kl = []
+for t in ts:
+    cov1 = jnp.array([[K(t + t0)]])
+    cov2 = jnp.array([[1.0]])
+    kl = stats.relative_entropy_gaussians(jnp.zeros(1), cov1, jnp.zeros(1), cov2)
+    ground_truth_kl.append(kl)
+ground_truth_kl = jnp.array(ground_truth_kl)
+
+plt.figure(figsize=(10, 6))
+for method_name in method_names:
+    for annealing_name in annealing_names:
+        kl_vals = []
+        ts_plot = []
+        for i in range(max_steps):
+            key = (example_name, method_name, annealing_name, num_particles, i)
+            if key in kls:
+                kl_vals.append(kls[key])
+                ts_plot.append(i * step_size)
+        if kl_vals:
+            plt.plot(ts_plot, kl_vals, label=f"{method_name}")
+plt.plot(ts, ground_truth_kl, 'k--', label="Ground Truth", linewidth=2)
+plt.yscale('log')
+plt.xlabel("Time")
+plt.ylabel("KL Divergence")
+plt.title(f"Example {example_name}, n={num_particles}")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+#%%
+# Plot KL vs num_particles at last time step
+for example_name in ['gaussians_far', 'gaussians_near', 'analytic']:
+    if example_name == 'gaussians_far' or example_name == 'gaussians_near':
+        step_size = 0.01
+        max_steps = 1000
+    elif example_name == 'analytic':
+        step_size = 0.002
+        max_steps = 1250
+    plt.figure(figsize=(10, 6))
+    for method_name in ['sde', 'sbtm']:
+        for annealing_name in annealing_names:
+            last_kls = []
+            for num_particles in num_particles_list:
+                key = (example_name, method_name, annealing_name, num_particles, max_steps-500)
+                if key in kls:
+                    last_kls.append(kls[key])
+            plt.plot(num_particles_list, last_kls, marker='o', label=f"{method_name}-{annealing_name}")
+    plt.xlabel("Number of particles")
+    plt.ylabel("KL Divergence at final time")
+    plt.title(f"Example {example_name}, t={max_steps*step_size}")
+    plt.xscale('log')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+#%%
+import pandas as pd
+examples = ['gaussians_far', 'gaussians_near', 'analytic']
+method_names = ['sde', 'sbtm', 'svgd']
+annealing_names = ['geometric', 'dilation', 'non-annealed']
+num_particles = 100
+
+for example_name in examples:
+    if example_name == 'analytic':
+        step_size = 0.002
+        max_steps = 1250
+    else:
+        step_size = 0.01
+        max_steps = 1000
+
+    data = []
+    for method_name in method_names:
+        row = []
+        for annealing_name in annealing_names:
+            key = (example_name, method_name, annealing_name, num_particles, max_steps-1)
+            val = kls.get(key, float('nan'))
+            row.append(val)
+        data.append(row)
+    df = pd.DataFrame(data, index=method_names, columns=annealing_names)
+    # Format to 3 significant digits
+    df = df.map(lambda x: f"{x:.2g}" if pd.notnull(x) else "nan")
+    print(f"\nKL at final time for {example_name}:")
+    print(df)
 
 #%%
 def plot_entropy_dissipation(example_name, target_dist, step_size, max_steps, smoothing=0.5, save=True, num_particles=1000):
@@ -245,13 +455,13 @@ def λ(t, t_end):
     return t
 
 def dilation_score(t, x, target_score, threshold=0.2):
-    t = np.clip(t, threshold, 1)
+    t = jnp.clip(t, threshold, 1)
     return target_score(x/t)
 
 def geometric_mean_score(t, x, prior_score, target_score):
     return t * target_score(x) + (1-t) * prior_score(x)
 
-example_name = 'gaussians_far_2d'
+example_name = 'gaussians_far'
 d = 2
 annealing_name = 'dilation'
 
