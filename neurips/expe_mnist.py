@@ -23,7 +23,7 @@ IMAGE_FOLDER = os.path.join(ROOT_FOLDER, "images")
 
 # %%
 # Visualization
-def gallery(array, ncols=3):
+def gallery(array, ncols=16):
     nindex, height, width, intensity = array.shape
     nrows = nindex // ncols
     result = (array.reshape(nrows, ncols, height, width, intensity)
@@ -197,26 +197,61 @@ plt.imshow(gallery(samples, 16))
 
 #%%
 # Langevin
-rng = jax.random.PRNGKey(1)
-sample_batch_size = 128
-samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
-# samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
+rng = jax.random.PRNGKey(2)
+sample_batch_size = 1024
+samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1)) # index 15*32+1 is a '7', index 4 is a '8'
+# samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1))# * 0.001
 # samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
 step_size = 0.001
-num_steps = 41
+num_steps = 61
 
 for i in tqdm(range(num_steps)):
     step_rng, rng = jax.random.split(rng)
     samples = samples + step_size * target_score(samples)
     samples += jnp.sqrt(2 * step_size) * jax.random.normal(step_rng, samples.shape)
-    if i % 20 == 0:
+    if i % 10 == 0:
         print(i)
         result = gallery(samples[:12])
         plt.imshow(result)
         plt.show()
 
-plt.imshow(gallery(samples, 16))
+plt.figure(figsize=(8, 8))
+plt.imshow(gallery(samples, int(np.sqrt(sample_batch_size))))
+#%%
+# Langevin
+rng = jax.random.PRNGKey(2)
+sample_batch_size = 1024
+step_size = 0.001
+num_steps = 31
+
+samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1)) # index 15*32+1 is a '7', index 4 is a '8'
+six = samples[0]
+eight = samples[4]
+zero = samples[5]
+three = samples[7]
+two = samples[32]
+four = samples[32+2]
+five = samples[32+3]
+seven = samples[15*32+1]
+digits = {'6': six, '8': eight, '0': zero, '3': three, '2': two, '4': four, '5': five, '7': seven}
+for (digit, sample) in digits.items():
+    samples = sample + jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.000
+    for i in tqdm(range(num_steps)):
+        step_rng, rng = jax.random.split(rng)
+        samples = samples + step_size * target_score(samples)
+        samples += jnp.sqrt(2 * step_size) * jax.random.normal(step_rng, samples.shape)
+        # if i % 10 == 0:
+        #     print(i)
+        #     result = gallery(samples[:12])
+        #     plt.imshow(result)
+        #     plt.show()
+
+    plt.figure(figsize=(8, 8))
+    plt.imshow(gallery(samples, int(np.sqrt(sample_batch_size))))
+    plt.axis('off')
+    plt.title(f'{digit}')
+    plt.show()
 
 #%%
 # Plan for SBTM:
@@ -336,13 +371,13 @@ opt_state = optimizer.init(static_params)
 #%%
 rng = jax.random.PRNGKey(1)
 sample_batch_size = 128
-samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
-# samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.01
+# samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1))
+samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.001
 # samples = jnp.zeros((sample_batch_size, 28, 28, 1))
 
 # Do a few steps of gradient descent to get current_score_model to output 0 for samples
 zero_target = jnp.zeros_like(samples)
-gd_epochs = 20
+gd_epochs = 10
 
 def mse_loss(params, apply_fn, x, _rng):
     pred = apply_fn(params, x)
@@ -351,13 +386,13 @@ def mse_loss(params, apply_fn, x, _rng):
 plt.imshow(gallery(current_score_model.apply(static_params, samples[:12])))
 plt.show()
 
-# Add 10 levels of noise to samples and concatenate them
-num_levels = 10
-noise_levels = jnp.linspace(0.01, 0.1, num_levels)
-samples_aug = jnp.concatenate([
-    samples + jax.random.normal(jax.random.PRNGKey(i), samples.shape) * noise_levels[i]
-    for i in range(num_levels)
-], axis=0)
+# # Add 10 levels of noise to samples and concatenate them
+# num_levels = 10
+# noise_levels = jnp.linspace(0.01, 0.1, num_levels)
+# samples_aug = jnp.concatenate([
+#     samples + jax.random.normal(jax.random.PRNGKey(i), samples.shape) * noise_levels[i]
+#     for i in range(num_levels)
+# ], axis=0)
 
 static_params, opt_state, loss_history = train(
     static_params,
@@ -369,7 +404,7 @@ static_params, opt_state, loss_history = train(
     mse_loss,
     epochs=gd_epochs,
     batch_size=sample_batch_size,
-    verbose=False
+    verbose=True
 )
 
 plt.imshow(gallery(current_score_model.apply(static_params, samples[:12])))
@@ -379,13 +414,17 @@ plt.show()
 
 #%%
 # SBTM sampling
+rng = jax.random.PRNGKey(1)
+sample_batch_size = 128
+samples = jax.random.normal(rng, (sample_batch_size, 28, 28, 1)) * 0.001
+
 step_size = 0.001
-num_steps = 21
+num_steps = 41
 for i in tqdm(range(num_steps)):
     step_rng, rng = jax.random.split(rng)
-    samples = samples + step_size * (target_score(samples) - current_score_model.apply(static_params, samples))
+    samples = samples + step_size * target_score(samples) - step_size * current_score_model.apply(static_params, samples)
     static_params, opt_state, losses = train(static_params, current_score_model.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=10, batch_size=64, verbose=False)
-    if i % 1 == 0:
+    if i % 5 == 0:
         print(i)
         result = gallery(samples[:12])
         plt.imshow(result)
@@ -396,3 +435,320 @@ plt.imshow(gallery(samples, 16))
 # what are the knobs and toggles:
 # step_size, num_steps, batch_size, epochs, sample_batch_size
 # comapre current_score at the end of the simulation with the ground truth (target_score)
+
+#%%
+rng = jax.random.PRNGKey(2)
+sample_batch_size = 1024
+step_size = 0.001
+num_steps = 31
+
+samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1)) # index 15*32+1 is a '7', index 4 is a '8'
+six = samples[0]
+eight = samples[4]
+zero = samples[5]
+three = samples[7]
+two = samples[32]
+four = samples[32+2]
+five = samples[32+3]
+seven = samples[15*32+1]
+digits = {'6': six, '8': eight, '0': zero, '3': three, '2': two, '4': four, '5': five, '7': seven}
+cosine_sims = {}
+
+small_batch_size = 128
+for (digit, sample) in digits.items():
+    samples = sample + jax.random.normal(rng, (small_batch_size, 28, 28, 1)) * 0.01
+    current_score_model = ScoreNetStatic()
+    static_params = current_score_model.init(rng, samples)
+    optimizer = optax.adamw(1e-3)
+    opt_state = optimizer.init(static_params)
+    
+    # set the first few samples to other modes
+    samples = samples.at[0].set(zero).at[1].set(two).at[2].set(three).at[3].set(four).at[4].set(five).at[5].set(six).at[6].set(seven).at[7].set(eight)
+    
+    cosine_sims[digit] = []
+    for i in tqdm(range(num_steps)):
+        step_rng, rng = jax.random.split(rng)
+        ts = target_score(samples)
+        cs = current_score_model.apply(static_params, samples)
+        samples = samples + step_size * ts - step_size * cs
+        static_params, opt_state, losses = train(static_params, current_score_model.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=2, batch_size=64, verbose=False)
+            
+        # Compute cosine similarity between target_score and current_score
+        ts_flat = ts.reshape(ts.shape[0], -1)
+        cs_flat = cs.reshape(cs.shape[0], -1)
+        dot_product = jnp.sum(ts_flat * cs_flat, axis=1)
+        ts_norm = jnp.linalg.norm(ts_flat, axis=1)
+        cs_norm = jnp.linalg.norm(cs_flat, axis=1)
+        cosine_sim = dot_product / (ts_norm * cs_norm + 1e-8)
+        avg_cosine_sim = jnp.mean(cosine_sim)
+        cosine_sims[digit].append(float(avg_cosine_sim))
+        # if i % 2 == 0:
+        #     print(f"Cosine similarity at step {i}: {avg_cosine_sim:.4f}")
+        
+        # if i % 10 == 0:
+        #     print(i)
+        #     result = gallery(samples[:12])
+        #     plt.imshow(result)
+        #     plt.show()
+            
+    # Plot the cosine similarity
+    plt.figure(figsize=(8, 2))
+    plt.plot(cosine_sims[digit])
+    plt.title(f'Cosine similarity (digit {digit})')
+    plt.xlabel('Step')
+    plt.ylabel('Cosine similarity')
+    plt.show()
+
+    # Plot the final samples
+    plt.figure(figsize=(8, 8))
+    plt.imshow(gallery(samples, 16))
+    plt.axis('off')
+    plt.title(f'SBTM {digit}')
+    plt.show()
+    
+    # Compare to gradient ascent
+    samples = sample + jax.random.normal(rng, (small_batch_size, 28, 28, 1)) * 0.01
+    samples = samples.at[0].set(zero).at[1].set(two).at[2].set(three).at[3].set(four).at[4].set(five).at[5].set(six).at[6].set(seven).at[7].set(eight)
+    for i in tqdm(range(num_steps)):
+        step_rng, rng = jax.random.split(rng)
+        ts = target_score(samples)
+        cs = current_score_model.apply(static_params, samples)
+        samples = samples + step_size * ts
+            
+    # Plot the final samples
+    plt.figure(figsize=(8, 8))
+    plt.imshow(gallery(samples, 16))
+    plt.axis('off')
+    plt.title(f'Gradient Ascent {digit}')
+    plt.show()
+    
+#%%
+rng = jax.random.PRNGKey(2)
+step_size = 0.001
+num_steps = 31
+
+small_batch_size = 64
+samples = jax.random.uniform(rng, (small_batch_size, 28, 28, 1))
+other_samples = jax.random.uniform(jax.random.PRNGKey(2), (small_batch_size, 28, 28, 1))
+other_samples2 = jax.random.uniform(jax.random.PRNGKey(2), (small_batch_size, 28, 28, 1))
+other_samples3 = jax.random.uniform(jax.random.PRNGKey(2), (small_batch_size, 28, 28, 1))
+
+current_score_model = ScoreNetStatic()
+static_params = current_score_model.init(rng, samples)
+optimizer = optax.adamw(1e-3)
+opt_state = optimizer.init(static_params)
+
+cosine_sims = []
+other_cosine_sims = []
+for i in tqdm(range(num_steps)):
+    noise_factor = 20*(num_steps/(20*i+1))
+    step_rng, rng = jax.random.split(rng)
+    ts = target_score(samples)
+    cs = current_score_model.apply(static_params, samples)
+    samples = samples + step_size * ts - noise_factor * step_size * cs
+    static_params, opt_state, losses = train(static_params, current_score_model.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=10, batch_size=64, verbose=False)
+    print(jnp.mean(jnp.abs(ts)))
+    print(jnp.mean(jnp.abs(cs)))
+    print(jnp.mean(jnp.abs(samples)))
+        
+    other_samples = other_samples + step_size * target_score(other_samples)
+    other_samples2 = other_samples2 + step_size * target_score(other_samples2) + step_size * jnp.sqrt(2 * step_size) * jax.random.normal(step_rng, other_samples2.shape)
+    other_samples3 = other_samples3 + step_size * target_score(other_samples3) + jnp.sqrt(2 * noise_factor * step_size) * jax.random.normal(step_rng, other_samples3.shape)
+    
+    # Compute cosine similarity between target_score and current_score
+    ts_flat = ts.reshape(ts.shape[0], -1)
+    cs_flat = cs.reshape(cs.shape[0], -1)
+    dot_product = jnp.sum(ts_flat * cs_flat, axis=1)
+    ts_norm = jnp.linalg.norm(ts_flat, axis=1)
+    cs_norm = jnp.linalg.norm(cs_flat, axis=1)
+    cosine_sim = dot_product / (ts_norm * cs_norm + 1e-8)
+    avg_cosine_sim = jnp.mean(cosine_sim)
+    cosine_sims.append(float(avg_cosine_sim))
+    
+    ts = target_score(other_samples)
+    cs = current_score_model.apply(static_params, other_samples)
+    other_ts_flat = ts.reshape(ts.shape[0], -1)
+    other_cs_flat = cs.reshape(cs.shape[0], -1)
+    other_dot_product = jnp.sum(other_ts_flat * other_cs_flat, axis=1)
+    other_ts_norm = jnp.linalg.norm(other_ts_flat, axis=1)
+    other_cs_norm = jnp.linalg.norm(other_cs_flat, axis=1)
+    other_cosine_sim = other_dot_product / (other_ts_norm * other_cs_norm + 1e-8)
+    avg_other_cosine_sim = jnp.mean(other_cosine_sim)
+    other_cosine_sims.append(float(avg_other_cosine_sim))
+    
+plt.figure(figsize=(8, 2))
+plt.plot(cosine_sims, label='Same')
+plt.plot(other_cosine_sims, label='GA')
+plt.title(f'Cosine similarity')
+plt.xlabel('Step')
+plt.ylabel('Cosine similarity')
+plt.legend()
+plt.show()
+
+# %%
+plt.imshow(gallery(samples, 16))
+plt.axis('off')
+plt.title(f'SBTM with scaled noise')
+plt.show()
+
+plt.imshow(gallery(other_samples, 16))
+plt.axis('off')
+plt.title(f'GA')
+plt.show()
+
+plt.imshow(gallery(other_samples2, 16))
+plt.axis('off')
+plt.title(f'Langevin')
+plt.show()
+
+plt.imshow(gallery(other_samples3, 16))
+plt.axis('off')
+plt.title(f'Langevin with scaled noise')
+plt.show()
+
+#%%
+cosine_sims = {}
+#%%
+epochs = 30
+rng = jax.random.PRNGKey(2)
+step_size = 0.001
+num_steps = 31
+
+small_batch_size = 64
+samples = jax.random.normal(rng, (small_batch_size, 28, 28, 1))
+samples2 = jax.random.normal(rng, (small_batch_size, 28, 28, 1))
+other_samples = jax.random.normal(jax.random.PRNGKey(2), (small_batch_size, 28, 28, 1))
+other_samples2 = jax.random.normal(jax.random.PRNGKey(2), (small_batch_size, 28, 28, 1))
+other_samples3 = jax.random.normal(jax.random.PRNGKey(2), (small_batch_size, 28, 28, 1))
+
+current_score_model = ScoreNetStatic()
+static_params = current_score_model.init(rng, samples)
+optimizer = optax.adamw(1e-3)
+opt_state = optimizer.init(static_params)
+
+current_score_model2 = ScoreNetStatic()
+static_params2 = current_score_model2.init(rng, samples2)
+optimizer2 = optax.adamw(1e-3)
+opt_state2 = optimizer2.init(static_params2)
+
+cosine_sims[epochs] = []
+for i in tqdm(range(num_steps)):
+    noise_factor = 10*(num_steps/(20*i+1))
+    step_rng, rng = jax.random.split(rng)
+    ts = target_score(samples)
+    cs = current_score_model.apply(static_params, samples)
+    samples = samples + step_size * ts - noise_factor * step_size * cs
+    static_params, opt_state, losses = train(static_params, current_score_model.apply, samples, step_rng, optimizer, opt_state, fast_ism_loss, epochs=epochs, batch_size=64, verbose=False)
+    
+    cs2 = current_score_model2.apply(static_params2, samples2)
+    samples2 = samples2 + step_size * ts - step_size * cs
+    static_params2, opt_state2, losses = train(static_params2, current_score_model2.apply, samples2, step_rng, optimizer2, opt_state2, fast_ism_loss, epochs=epochs, batch_size=64, verbose=False)
+        
+    other_samples = other_samples + step_size * target_score(other_samples)
+    other_samples2 = other_samples2 + step_size * target_score(other_samples2) + step_size * jnp.sqrt(2 * step_size) * jax.random.normal(step_rng, other_samples2.shape)
+    other_samples3 = other_samples3 + step_size * target_score(other_samples3) + jnp.sqrt(2 * noise_factor * step_size) * jax.random.normal(step_rng, other_samples3.shape)
+    
+    # Compute cosine similarity between target_score and current_score
+    ts_flat = ts.reshape(ts.shape[0], -1)
+    cs_flat = cs.reshape(cs.shape[0], -1)
+    dot_product = jnp.sum(ts_flat * cs_flat, axis=1)
+    ts_norm = jnp.linalg.norm(ts_flat, axis=1)
+    cs_norm = jnp.linalg.norm(cs_flat, axis=1)
+    cosine_sim = dot_product / (ts_norm * cs_norm + 1e-8)
+    avg_cosine_sim = jnp.mean(cosine_sim)
+    cosine_sims[epochs].append(float(avg_cosine_sim))
+    
+# %%
+plt.imshow(gallery(samples2, 16))
+plt.axis('off')
+plt.title(f'SBTM')
+plt.show()
+
+plt.imshow(gallery(samples, 16))
+plt.axis('off')
+plt.title(f'SBTM with scaled noise')
+plt.show()
+
+# plt.imshow(gallery(other_samples, 16))
+# plt.axis('off')
+# plt.title(f'GA')
+# plt.show()
+
+# plt.imshow(gallery(other_samples2, 16))
+# plt.axis('off')
+# plt.title(f'Langevin')
+# plt.show()
+
+# plt.imshow(gallery(other_samples3, 16))
+# plt.axis('off')
+# plt.title(f'Langevin with scaled noise')
+# plt.show()
+#%%
+plt.figure(figsize=(8, 2))
+for epoch in [2,5,10,30,100]:
+    plt.plot([0.001*t for t in range(num_steps)], cosine_sims[epoch], label=f'epoch {epoch}')
+plt.title(f'Cosine similarity')
+plt.xlabel('time')
+plt.ylabel('Cosine similarity')
+plt.legend()
+plt.show()
+   
+#%%
+rng = jax.random.PRNGKey(2)
+step_size = 0.001
+num_steps = 31
+
+small_batch_size = 64
+samples = jax.random.uniform(rng, (small_batch_size, 28, 28, 1))
+other_samples = jax.random.uniform(jax.random.PRNGKey(3), (small_batch_size, 28, 28, 1))
+
+current_score_model = ScoreNetStatic()
+static_params = current_score_model.init(rng, samples)
+optimizer = optax.adamw(1e-3)
+opt_state = optimizer.init(static_params)
+
+cosine_sims = []
+for i in tqdm(range(num_steps)):
+    step_rng, rng = jax.random.split(rng)
+    ts = target_score(samples)
+    samples = samples + step_size * ts + jnp.sqrt(2 * step_size) * jax.random.normal(step_rng, samples.shape)
+            
+    other_ts = target_score(other_samples)
+    other_samples = other_samples + step_size * other_ts + jnp.sqrt(2 * step_size) * jax.random.normal(step_rng, other_samples.shape)
+    
+    ts_flat = ts.reshape(ts.shape[0], -1)
+    other_ts_flat = other_ts.reshape(cs.shape[0], -1)
+    dot_product = jnp.sum(ts_flat * other_ts_flat, axis=1)
+    ts_norm = jnp.linalg.norm(ts_flat, axis=1)
+    cs_norm = jnp.linalg.norm(other_ts_flat, axis=1)
+    cosine_sim = dot_product / (ts_norm * cs_norm + 1e-8)
+    avg_cosine_sim = jnp.mean(cosine_sim)
+    cosine_sims.append(float(avg_cosine_sim))
+    
+    
+plt.imshow(gallery(samples, 16))
+plt.axis('off')
+plt.show()
+plt.imshow(gallery(other_samples, 16))
+plt.axis('off')
+plt.show()
+
+plt.figure(figsize=(8, 2))
+plt.plot(cosine_sims, label='Same')
+plt.title(f'Cosine similarity')
+plt.xlabel('Step')
+plt.ylabel('Cosine similarity')
+plt.legend()
+plt.show()
+
+
+#%%
+samples = jax.random.uniform(rng, (small_batch_size, 28, 28, 1))
+score = current_score_model.apply(static_params, samples)
+plt.imshow(gallery(samples))
+plt.show()
+plt.imshow(gallery(score))
+plt.show()
+
+plt.imshow(gallery(samples + score))
+plt.show()
