@@ -693,6 +693,69 @@ plt.ylabel('Cosine similarity')
 plt.legend()
 plt.show()
    
+   
+#%%
+rng = jax.random.PRNGKey(2)
+sample_batch_size = 1024
+step_size = 0.001
+num_steps = 21
+epochs = 5
+
+samples = jax.random.uniform(rng, (sample_batch_size, 28, 28, 1)) # index 15*32+1 is a '7', index 4 is a '8'
+nine = samples[15*32+1]
+
+small_batch_size = 128
+samples = nine + jax.random.normal(rng, (small_batch_size, 28, 28, 1)) * 0.002
+samples2 = nine + jax.random.uniform(rng, (small_batch_size, 28, 28, 1)) * 0.002
+samples3 = nine + jax.random.uniform(rng, (small_batch_size, 28, 28, 1)) * 0.002
+
+current_score_model = ScoreNetStatic()
+static_params = current_score_model.init(rng, samples)
+optimizer = optax.adamw(1e-3)
+opt_state = optimizer.init(static_params)
+
+static_params, opt_state, losses = train(static_params, current_score_model.apply, samples3, step_rng, optimizer, opt_state, fast_ism_loss, epochs=40, batch_size=64, verbose=True)
+print(jnp.mean(jnp.abs(step_size * noise_factor * cs)))
+
+for i in tqdm(range(num_steps)):
+    step_rng, rng = jax.random.split(rng)
+    # noise_factor = 1
+    noise_factor = num_steps * 1/(i*2+1)
+    ts = target_score(samples)
+    ts2 = target_score(samples2)
+    ts3 = target_score(samples3)
+    
+    samples = samples + step_size * ts
+    bm = jnp.sqrt(2 * step_size * noise_factor) * jax.random.normal(step_rng, samples.shape)
+    samples2 = samples2 + step_size * ts2 + bm
+    
+    cs = current_score_model.apply(static_params, samples)
+    samples3 = samples3 + step_size * ts3 - step_size * noise_factor * cs
+    static_params, opt_state, losses = train(static_params, current_score_model.apply, samples3, step_rng, optimizer, opt_state, fast_ism_loss, epochs=epochs, batch_size=64, verbose=False)
+    
+    print(jnp.mean(jnp.abs(step_size * ts)))
+    print(jnp.mean(jnp.abs(step_size * noise_factor * cs)))
+    print(jnp.mean(jnp.abs(bm)))
+
+plt.figure(figsize=(8, 8))
+plt.imshow(gallery(samples, 16))
+plt.axis('off')
+plt.title(f'Gradient ascent')
+plt.show()
+
+plt.figure(figsize=(8, 8))
+plt.imshow(gallery(samples3, 16))
+plt.axis('off')
+plt.title(f'SBTM, {epochs} epochs')
+plt.show()
+
+plt.figure(figsize=(8, 8))
+plt.imshow(gallery(samples2, 16))
+plt.axis('off')
+plt.title(f'Langevin')
+plt.show()
+
+
 #%%
 rng = jax.random.PRNGKey(2)
 step_size = 0.001

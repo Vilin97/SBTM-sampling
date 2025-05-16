@@ -39,7 +39,7 @@ def plot_distributions(initial_particles, transported_particles, density, lims=N
 
     return fig, ax
 
-def plot_distributions_2d(particles, density, lims=None, resolution=400, num_scatter=10000):
+def plot_distributions_2d(particles, density, lims=None, resolution=400, num_scatter=20000):
     """Plot the 2D density and scatterplot the transported particles"""
     fig, ax = plt.subplots(figsize=(6, 6))
     

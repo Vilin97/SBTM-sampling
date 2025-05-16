@@ -3,6 +3,7 @@
 /models/*
 /reports/*
 /plots
+*.pkl
 
 sbtm-env/
 *.png
