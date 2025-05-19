@@ -9,7 +9,7 @@ import optax
 from flax import nnx
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.1'
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 #%%
 s = 0.2
 f_dist = distribution.Gaussian(jnp.zeros(2), jnp.eye(2)*s)
@@ -69,19 +69,6 @@ dt = 0.2
 x_new_f = x + dt * (g_score_vals - f_score_vals)
 x_new_bm = x + jnp.sqrt(dt) * bm
 
-# score_model = models.MLP(2)
-# optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
-# loss = lambda model, x: losses.explicit_score_matching_loss(model, x, f_score_vals)
-# for i in range(2000):
-#     sampler.opt_step(score_model, optimizer, loss, x)
-# f_score_vals = f_score(x_new)
-
-# loss = losses.implicit_score_matching_loss
-# # optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
-# for i in range(10):
-#     sampler.opt_step(score_model, optimizer, loss, x_new)
-# score_model_vals = score_model(x_new)
-    
 plt.figure(figsize=(4, 4))
 plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
 plt.contourf(xx, yy, g_vals, levels=30, alpha=0.5, cmap='Reds')
@@ -123,47 +110,39 @@ from sbtm import models, losses, sampler
 import optax
 from flax import nnx
 
+x_aug = jnp.concatenate([x, jrandom.normal(jrandom.PRNGKey(10), (10000, 2)) * s], axis=0)
+
 score_model = models.MLP(2)
 # loss = losses.implicit_score_matching_loss
 loss = lambda model, x: losses.explicit_score_matching_loss(model, x, f_score(x))
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
 
 #%%
-for i in range(1000):
-    sampler.opt_step(score_model, optimizer, loss, x)
+trainsteps = 500
+loss = losses.implicit_score_matching_loss
+for i in range(trainsteps):
+    sampler.opt_step(score_model, optimizer, loss, x_aug)
 
 #%%
 
 plt.figure(figsize=(4, 4))
 plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
 plt.contourf(xx, yy, g_vals, levels=30, alpha=0.5, cmap='Reds')
-plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
+plt.scatter(x_aug[:, 0], x_aug[:, 1], c='k', s=10)
 
-# Compute directions
-s_dir = -score_model(p.reshape(1,2)).flatten()
-f_dir = -f_score(p.reshape(1,2)).flatten()
-
-# Normalize directions for visualization
-norm_factor = 6
-s_dir = s_dir / norm_factor
-f_dir = f_dir / norm_factor
-
-# Draw arrow for the rightmost point
-plt.arrow(p[0], p[1], s_dir[0], s_dir[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=r'$-s$ (learned)')
-plt.arrow(p[0], p[1], f_dir[0], f_dir[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=r'$-\nabla \log f_t$')
-plt.scatter([p[0]], [p[1]], c='yellow', s=60, edgecolors='k', zorder=5)
-
-# Draw arrows for 5 more randomly chosen points
-key = jrandom.PRNGKey(5)
-rand_indices = jrandom.choice(key, x.shape[0], shape=(5,), replace=False)
 for i, idx in enumerate(rand_indices):
-    p_rand = x[idx]
-    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten() / norm_factor
-    f_dir_rand = -f_score(p_rand.reshape(1,2)).flatten() / norm_factor
-    plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='red', width=0.01, head_width=0.07, length_includes_head=True)
-    plt.arrow(p_rand[0], p_rand[1], f_dir_rand[0], f_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True)
+    p_rand = x_aug[idx]
+    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten() * step_size
+    f_score_val = -f_score_vals[idx] * step_size
+    s_label = '-learned score' if i == 0 else None
+    f_label = '-true score' if i == 0 else None
+    
+    plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=s_label)
+    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
     plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
 
 plt.legend(loc='upper right')
 plt.axis('off')
+plt.title(f'Learned score after {trainsteps} implicit steps')
 plt.show()
+# %%
