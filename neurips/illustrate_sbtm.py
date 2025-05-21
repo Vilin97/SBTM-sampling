@@ -2,14 +2,19 @@
 import jax.numpy as jnp
 import jax.random as jrandom
 import matplotlib.pyplot as plt
-from sbtm import distribution 
+import sys
+sys.path.append('/home/vilin/SBTM-sampling')
+from tqdm import trange
+import numpy as np
 
+from sbtm import distribution 
 from sbtm import models, losses, sampler
 import optax
 from flax import nnx
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
 #%%
 s = 0.2
 f_dist = distribution.Gaussian(jnp.zeros(2), jnp.eye(2)*s)
@@ -113,14 +118,15 @@ from flax import nnx
 x_aug = jnp.concatenate([x, jrandom.normal(jrandom.PRNGKey(10), (10000, 2)) * s], axis=0)
 
 score_model = models.MLP(2)
-# loss = losses.implicit_score_matching_loss
-loss = lambda model, x: losses.explicit_score_matching_loss(model, x, f_score(x))
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+loss_vals = []
 
 #%%
 trainsteps = 500
+# loss = lambda model, x: losses.explicit_score_matching_loss(model, x, f_score(x))
 loss = losses.implicit_score_matching_loss
 for i in range(trainsteps):
+    loss_vals.append(loss(score_model, x_aug))
     sampler.opt_step(score_model, optimizer, loss, x_aug)
 
 #%%
@@ -144,5 +150,175 @@ for i, idx in enumerate(rand_indices):
 plt.legend(loc='upper right')
 plt.axis('off')
 plt.title(f'Learned score after {trainsteps} implicit steps')
+plt.show()
+
+#%%
+# Train on explicit loss
+score_model_exp = models.MLP(2)
+optimizer_exp = nnx.Optimizer(score_model_exp, optax.adamw(0.0005, 0.9))
+explicit_loss_vals_exp = []
+implicit_loss_vals_exp = []
+
+loss = lambda model, x: losses.explicit_score_matching_loss(model, x, f_score(x))
+for i in range(trainsteps):
+    explicit_loss_vals_exp.append(loss(score_model_exp, x_aug))
+    implicit_loss_vals_exp.append(losses.implicit_score_matching_loss(score_model_exp, x_aug))
+    sampler.opt_step(score_model_exp, optimizer_exp, loss, x_aug)
+
+plt.plot(explicit_loss_vals_exp, label='Explicit Loss')
+plt.plot(implicit_loss_vals_exp, label='Implicit Loss')
+plt.xlabel('Iteration')
+plt.ylabel('Loss')
+plt.title('Training on Explicit Score Matching')
+plt.legend()
+plt.show()
+
+#%%
+x_aug = jnp.concatenate([x, jrandom.normal(jrandom.PRNGKey(10), (10000, 2)) * s], axis=0)
+
+# Train on implicit loss
+score_model = models.MLP(2)
+optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+loss_vals = []
+explicit_loss_vals = []
+fisher_vals = []
+
+trainsteps = 300
+loss = losses.implicit_score_matching_loss
+for i in range(trainsteps):
+    loss_vals.append(loss(score_model, x_aug))
+    explicit_loss_vals.append(losses.explicit_score_matching_loss(score_model, x_aug, f_score(x_aug)))
+    sampler.opt_step(score_model, optimizer, loss, x_aug)
+    fisher_vals.append(jnp.mean(score_model(x_aug)**2))
+
+plt.plot(explicit_loss_vals, label='Explicit Loss')
+plt.plot(loss_vals, label='Implicit Loss')
+for F in [1,2,3,4]:
+    plt.plot([l+F*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss + {F}*Fisher')
+plt.xlabel('Iteration')
+plt.title('Training on Implicit Score Matching')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(6, 6))
+plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
+plt.contourf(xx, yy, g_vals, levels=30, alpha=0.5, cmap='Reds')
+plt.scatter(x_aug[:, 0], x_aug[:, 1], c='k', s=10)
+
+for i, idx in enumerate(rand_indices):
+    p_rand = x_aug[idx]
+    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten() * step_size
+    f_score_val = -f_score_vals[idx] * step_size
+    s_label = '-learned score' if i == 0 else None
+    f_label = '-true score' if i == 0 else None
+    
+    plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=s_label)
+    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
+    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
+
+plt.legend(loc='upper right')
+plt.axis('off')
+plt.title(f'Learned score after {trainsteps} steps on implicit loss')
+plt.show()
+
+#%%
+# x_aug = jnp.concatenate([x, jrandom.normal(jrandom.PRNGKey(10), (10000, 2)) * s], axis=0)
+
+# Train on implicit loss + Fisher
+score_model = models.MLP(2)
+optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+loss_vals = []
+explicit_loss_vals = []
+fisher_vals = []
+
+trainsteps = 6000
+fisher_factor = 8
+loss = lambda model, x: 1/(fisher_factor) * losses.implicit_score_matching_loss(model, x) + jnp.mean(model(x)**2)
+for i in trange(trainsteps):
+    loss_vals.append(loss(score_model, x_aug))
+    explicit_loss_vals.append(losses.explicit_score_matching_loss(score_model, x_aug, f_score(x_aug)))
+    fisher_vals.append(jnp.mean(score_model(x_aug)**2))
+    sampler.opt_step(score_model, optimizer, loss, x_aug)
+#%%
+plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
+plt.plot([l-fisher_factor*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss')
+plt.plot(loss_vals, label=f'Implicit Loss + {fisher_factor}*Fisher')
+# plt.plot(loss_vals, label=f'Implicit Loss + {fisher_factor}*Fisher')
+# for F in range(-fisher_factor, 1):
+#     plt.plot([l+F*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss + {F+fisher_factor}*Fisher')
+plt.axhline(0, color='black', linestyle='dotted', linewidth=1)
+plt.xlabel('Iteration')
+plt.title(f'Training on Implicit Loss + {fisher_factor}*Fisher')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(6, 6))
+plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
+plt.contourf(xx, yy, g_vals, levels=30, alpha=0.5, cmap='Reds')
+plt.scatter(x_aug[:, 0], x_aug[:, 1], c='k', s=10)
+
+for i, idx in enumerate(rand_indices):
+    p_rand = x_aug[idx]
+    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten() * step_size
+    f_score_val = -f_score_vals[idx] * step_size
+    s_label = '-learned score' if i == 0 else None
+    f_label = '-true score' if i == 0 else None
+    
+    plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=s_label)
+    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
+    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
+
+plt.legend(loc='upper right')
+plt.axis('off')
+plt.title(f'Learned score after {trainsteps} steps on implicit loss + {fisher_factor}*Fisher')
+plt.show()
+# %%
+# Train on implicit loss
+score_model = models.MLP(2)
+optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+loss_vals = []
+explicit_loss_vals = []
+scaled_loss_vals = []
+fisher_vals = []
+
+trainsteps = 300
+loss = losses.implicit_score_matching_loss
+for i in trange(trainsteps):
+    loss_vals.append(loss(score_model, x_aug))
+    explicit_loss_vals.append(losses.explicit_score_matching_loss(score_model, x_aug, f_score(x_aug)))
+    scaled_loss_vals.append(losses.explicit_score_matching_loss(score_model, x_aug, 8*f_score(x_aug)))
+    fisher_vals.append(jnp.mean(score_model(x_aug)**2))
+    sampler.opt_step(score_model, optimizer, loss, x_aug)
+#%%
+plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
+plt.plot(scaled_loss_vals, label=f'Scaled Explicit Loss, avg={np.mean(scaled_loss_vals):.2f}')
+
+for F in range(-fisher_factor, 1):
+    plt.plot([l+F*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss + {F+fisher_factor}*Fisher')
+plt.axhline(0, color='black', linestyle='dotted', linewidth=1)
+plt.xlabel('Iteration')
+plt.title(f'Training on Implicit Loss')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(6, 6))
+plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
+plt.contourf(xx, yy, g_vals, levels=30, alpha=0.5, cmap='Reds')
+plt.scatter(x_aug[:, 0], x_aug[:, 1], c='k', s=10)
+
+for i, idx in enumerate(rand_indices):
+    p_rand = x_aug[idx]
+    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten() * step_size / 8
+    f_score_val = -f_score_vals[idx] * step_size
+    s_label = r'-$\frac{1}{8}$learned score' if i == 0 else None
+    f_label = '-true score' if i == 0 else None
+    
+    plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=s_label)
+    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
+    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
+
+plt.legend(loc='upper right')
+plt.axis('off')
+plt.title(f'Learned score after {trainsteps} steps on implicit loss')
 plt.show()
 # %%
