@@ -222,8 +222,6 @@ plt.title(f'Learned score after {trainsteps} steps on implicit loss')
 plt.show()
 
 #%%
-# x_aug = jnp.concatenate([x, jrandom.normal(jrandom.PRNGKey(10), (10000, 2)) * s], axis=0)
-
 # Train on implicit loss + Fisher
 score_model = models.MLP(2)
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
@@ -231,7 +229,7 @@ loss_vals = []
 explicit_loss_vals = []
 fisher_vals = []
 
-trainsteps = 6000
+trainsteps = 600
 fisher_factor = 8
 loss = lambda model, x: 1/(fisher_factor) * losses.implicit_score_matching_loss(model, x) + jnp.mean(model(x)**2)
 for i in trange(trainsteps):
@@ -272,45 +270,79 @@ plt.legend(loc='upper right')
 plt.axis('off')
 plt.title(f'Learned score after {trainsteps} steps on implicit loss + {fisher_factor}*Fisher')
 plt.show()
+
+
 # %%
-# Train on implicit loss
-score_model = models.MLP(2)
+"Change density to see if fisher_factor of ~8 is still optimal for other densities"
+f_dist = distribution.GaussianMixture([jnp.array([-2.5,0]), jnp.array([2.5,0])], [jnp.eye(2), jnp.eye(2)], [0.5, 0.5])
+f_pdf = f_dist.density
+f_score = f_dist.score
+
+key = jrandom.PRNGKey(0)
+x = f_dist.sample(key, 1000)
+# Create a grid for heatmaps
+xx, yy = jnp.meshgrid(jnp.linspace(-6, 6, 200), jnp.linspace(-3, 3, 200))
+grid = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)
+
+# Vectorized evaluation of pdfs on the grid
+f_vals = jnp.reshape(f_pdf(grid), xx.shape)
+f_score_vals = f_score(x)
+#%%
+plt.figure(figsize=(8, 4))
+plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
+plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
+
+# Draw arrows for 5 more randomly chosen points
+key = jrandom.PRNGKey(7)
+rand_indices = jrandom.choice(key, x.shape[0], shape=(10,), replace=False)
+
+for i, idx in enumerate(rand_indices):
+    p_rand = x[idx]
+    f_score_val = -f_score_vals[idx]
+    f_label = r'$-\nabla \log f_t$' if i == 0 else None
+    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
+    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
+
+plt.legend(loc='upper right')
+plt.axis('off')
+plt.show()
+#%%
+# Train on implicit loss + Fisher
+score_model = models.MLP(2, hidden_units=[128, 128, 128])
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
 loss_vals = []
 explicit_loss_vals = []
-scaled_loss_vals = []
 fisher_vals = []
 
 trainsteps = 300
-loss = losses.implicit_score_matching_loss
+fisher_factor = 0.5
+loss = lambda model, x: losses.implicit_score_matching_loss(model, x) + fisher_factor * jnp.mean(model(x)**2)
 for i in trange(trainsteps):
-    loss_vals.append(loss(score_model, x_aug))
-    explicit_loss_vals.append(losses.explicit_score_matching_loss(score_model, x_aug, f_score(x_aug)))
-    scaled_loss_vals.append(losses.explicit_score_matching_loss(score_model, x_aug, 8*f_score(x_aug)))
-    fisher_vals.append(jnp.mean(score_model(x_aug)**2))
-    sampler.opt_step(score_model, optimizer, loss, x_aug)
-#%%
-plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
-plt.plot(scaled_loss_vals, label=f'Scaled Explicit Loss, avg={np.mean(scaled_loss_vals):.2f}')
+    loss_vals.append(loss(score_model, x))
+    explicit_loss_vals.append(losses.explicit_score_matching_loss(score_model, x, f_score(x)))
+    fisher_vals.append(jnp.mean(score_model(x)**2))
+    sampler.opt_step(score_model, optimizer, loss, x)
 
-for F in range(-fisher_factor, 1):
-    plt.plot([l+F*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss + {F+fisher_factor}*Fisher')
+plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
+min_idx = np.argmin(explicit_loss_vals)
+plt.scatter(min_idx, explicit_loss_vals[min_idx], color='red', s=60, zorder=10, label=f'{explicit_loss_vals[min_idx]:.2f}')
+plt.plot([l-fisher_factor*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss')
+plt.plot(loss_vals, label=f'Implicit Loss + {fisher_factor}*Fisher')
 plt.axhline(0, color='black', linestyle='dotted', linewidth=1)
 plt.xlabel('Iteration')
-plt.title(f'Training on Implicit Loss')
+plt.title(f'Training on Implicit Loss + {fisher_factor}*Fisher')
 plt.legend()
 plt.show()
 
-plt.figure(figsize=(6, 6))
+plt.figure(figsize=(8, 4))
 plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
-plt.contourf(xx, yy, g_vals, levels=30, alpha=0.5, cmap='Reds')
-plt.scatter(x_aug[:, 0], x_aug[:, 1], c='k', s=10)
+plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
 
 for i, idx in enumerate(rand_indices):
-    p_rand = x_aug[idx]
-    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten() * step_size / 8
-    f_score_val = -f_score_vals[idx] * step_size
-    s_label = r'-$\frac{1}{8}$learned score' if i == 0 else None
+    p_rand = x[idx]
+    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten()
+    f_score_val = -f_score_vals[idx]
+    s_label = '-learned score' if i == 0 else None
     f_label = '-true score' if i == 0 else None
     
     plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=s_label)
@@ -319,6 +351,6 @@ for i, idx in enumerate(rand_indices):
 
 plt.legend(loc='upper right')
 plt.axis('off')
-plt.title(f'Learned score after {trainsteps} steps on implicit loss')
+plt.title(f'Learned score after {trainsteps} steps on implicit loss + {fisher_factor}*Fisher')
 plt.show()
-# %%
+
