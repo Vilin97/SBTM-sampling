@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jrandom
 import matplotlib.pyplot as plt
 import sys
-sys.path.append('/home/vilin/SBTM-sampling')
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tqdm import trange
 import numpy as np
 
@@ -11,8 +11,9 @@ from sbtm import distribution
 from sbtm import models, losses, sampler
 import optax
 from flax import nnx
+import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 #%%
@@ -239,6 +240,8 @@ for i in trange(trainsteps):
     sampler.opt_step(score_model, optimizer, loss, x_aug)
 #%%
 plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
+min_idx = np.argmin(explicit_loss_vals)
+plt.scatter(min_idx, explicit_loss_vals[min_idx], color='red', s=60, zorder=10, label=f'{explicit_loss_vals[min_idx]:.2f}')
 plt.plot([l-fisher_factor*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss')
 plt.plot(loss_vals, label=f'Implicit Loss + {fisher_factor}*Fisher')
 # plt.plot(loss_vals, label=f'Implicit Loss + {fisher_factor}*Fisher')
@@ -354,3 +357,98 @@ plt.axis('off')
 plt.title(f'Learned score after {trainsteps} steps on implicit loss + {fisher_factor}*Fisher')
 plt.show()
 
+#%%
+# DDPM-style noise prediction loss
+
+class CondMLP(nnx.Module):
+    """MLP that conditions on σ (scalar or (B,) or (B,1))."""
+    def __init__(self, d_x, hidden_units=[128, 128],
+                 activation=nnx.soft_sign, seed=0):
+        rngs = nnx.Rngs(seed)
+        layers, inp = [], d_x + 1           # +1 for σ
+        for h in hidden_units:
+            layers.append(nnx.Linear(inp, h, rngs=rngs))
+            inp = h
+        self.hidden, self.out, self.act = layers, nnx.Linear(inp, d_x, rngs=rngs), activation
+
+    def __call__(self, x, sigma):           # x: (B,d), sigma: scalar or array
+        sigma = jnp.asarray(sigma, dtype=x.dtype)
+        if sigma.ndim == 0:                 # make (B,1)
+            sigma = jnp.broadcast_to(sigma, (x.shape[0], 1))
+        elif sigma.ndim == 1:               # (B,) -> (B,1)
+            sigma = sigma.reshape(-1, 1)
+
+        h = jnp.concatenate([x, sigma], axis=-1)
+        for layer in self.hidden:
+            h = self.act(layer(h))
+        return self.out(h)
+
+def ddpm_loss(model, x, rng, σ_min=0.01, σ_max=10.0):
+    k_σ, k_ε = jrandom.split(rng)
+
+    log_σ = jrandom.uniform(
+        k_σ,
+        shape=(x.shape[0], 1),
+        dtype=x.dtype,                         # <-- real dtype
+        minval=jnp.log(σ_min),
+        maxval=jnp.log(σ_max),
+    )
+    σ       = jnp.exp(log_σ)
+
+    ε       = jrandom.normal(k_ε, x.shape, dtype=x.dtype)
+    x_noisy = x + σ * ε
+
+    pred   = model(x_noisy, σ)
+    target = -ε / σ
+    return jnp.mean(jnp.sum((pred - target) ** 2, axis=-1))
+
+# Train on DDPM loss
+score_model = CondMLP(d_x=2, hidden_units=[128, 128, 128])
+optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
+loss_vals = []
+explicit_loss_vals = []
+fisher_vals = []
+
+trainsteps = 300
+rng = jrandom.PRNGKey(0)
+loss = ddpm_loss
+for i in trange(trainsteps):
+    rng, step_rng = jrandom.split(rng)
+
+    loss_val = loss(score_model, x, step_rng)   # ← same key
+    loss_vals.append(loss_val)
+    explicit_loss_val = jnp.sum(jnp.square(score_model(x, 0.01) - f_score(x))) / x.shape[0]
+    explicit_loss_vals.append(explicit_loss_val)
+
+    loss_value, grads = nnx.value_and_grad(loss)(score_model, x, step_rng)
+    optimizer.update(grads)
+
+plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
+min_idx = np.argmin(explicit_loss_vals)
+plt.scatter(min_idx, explicit_loss_vals[min_idx], color='red', s=60, zorder=10, label=f'{explicit_loss_vals[min_idx]:.2f}')
+plt.plot(loss_vals, label=f'DDPM Loss')
+plt.axhline(0, color='black', linestyle='dotted', linewidth=1)
+plt.xlabel('Iteration')
+plt.title(f'Training on DDPM Loss')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(8, 4))
+plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
+plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
+
+for i, idx in enumerate(rand_indices):
+    p_rand = x[idx]
+    s_dir_rand = -score_model(p_rand.reshape(1,2), 0.01).flatten()
+    f_score_val = -f_score_vals[idx]
+    s_label = '-learned score' if i == 0 else None
+    f_label = '-true score' if i == 0 else None
+    
+    plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=s_label)
+    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
+    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
+
+plt.legend(loc='upper right')
+plt.axis('off')
+plt.title(f'Learned score after {trainsteps} steps on DDPM loss')
+plt.show()
