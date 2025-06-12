@@ -1,4 +1,5 @@
 # %%
+import jax
 import jax.numpy as jnp
 import jax.random as jrandom
 import matplotlib.pyplot as plt
@@ -17,6 +18,7 @@ import os
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 #%%
+"Illustrate SBTM with a simple 2D Gaussian mixture and a Gaussian distribution"
 s = 0.2
 f_dist = distribution.Gaussian(jnp.zeros(2), jnp.eye(2)*s)
 f_pdf = f_dist.density
@@ -71,6 +73,7 @@ plt.axis('off')
 plt.show()
 
 #%%
+"Move particles"
 dt = 0.2
 x_new_f = x + dt * (g_score_vals - f_score_vals)
 x_new_bm = x + jnp.sqrt(dt) * bm
@@ -112,9 +115,7 @@ plt.axis('off')
 plt.show()
 
 # %%
-from sbtm import models, losses, sampler
-import optax
-from flax import nnx
+"Learning the score"
 
 x_aug = jnp.concatenate([x, jrandom.normal(jrandom.PRNGKey(10), (10000, 2)) * s], axis=0)
 
@@ -122,15 +123,12 @@ score_model = models.MLP(2)
 optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
 loss_vals = []
 
-#%%
 trainsteps = 500
 # loss = lambda model, x: losses.explicit_score_matching_loss(model, x, f_score(x))
 loss = losses.implicit_score_matching_loss
 for i in range(trainsteps):
     loss_vals.append(loss(score_model, x_aug))
     sampler.opt_step(score_model, optimizer, loss, x_aug)
-
-#%%
 
 plt.figure(figsize=(4, 4))
 plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
@@ -276,13 +274,13 @@ plt.show()
 
 
 # %%
-"Change density to see if fisher_factor of ~8 is still optimal for other densities"
+"Sample Gaussian Mixture"
 f_dist = distribution.GaussianMixture([jnp.array([-2.5,0]), jnp.array([2.5,0])], [jnp.eye(2), jnp.eye(2)], [0.5, 0.5])
 f_pdf = f_dist.density
 f_score = f_dist.score
 
 key = jrandom.PRNGKey(0)
-x = f_dist.sample(key, 1000)
+x = f_dist.sample(key, 1024)
 # Create a grid for heatmaps
 xx, yy = jnp.meshgrid(jnp.linspace(-6, 6, 200), jnp.linspace(-3, 3, 200))
 grid = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)
@@ -290,72 +288,8 @@ grid = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)
 # Vectorized evaluation of pdfs on the grid
 f_vals = jnp.reshape(f_pdf(grid), xx.shape)
 f_score_vals = f_score(x)
-#%%
-plt.figure(figsize=(8, 4))
-plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
-plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
-
-# Draw arrows for 5 more randomly chosen points
 key = jrandom.PRNGKey(7)
 rand_indices = jrandom.choice(key, x.shape[0], shape=(10,), replace=False)
-
-for i, idx in enumerate(rand_indices):
-    p_rand = x[idx]
-    f_score_val = -f_score_vals[idx]
-    f_label = r'$-\nabla \log f_t$' if i == 0 else None
-    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
-    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
-
-plt.legend(loc='upper right')
-plt.axis('off')
-plt.show()
-#%%
-# Train on implicit loss + Fisher
-score_model = models.MLP(2, hidden_units=[128, 128, 128])
-optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
-loss_vals = []
-explicit_loss_vals = []
-fisher_vals = []
-
-trainsteps = 300
-fisher_factor = 0.5
-loss = lambda model, x: losses.implicit_score_matching_loss(model, x) + fisher_factor * jnp.mean(model(x)**2)
-for i in trange(trainsteps):
-    loss_vals.append(loss(score_model, x))
-    explicit_loss_vals.append(losses.explicit_score_matching_loss(score_model, x, f_score(x)))
-    fisher_vals.append(jnp.mean(score_model(x)**2))
-    sampler.opt_step(score_model, optimizer, loss, x)
-
-plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
-min_idx = np.argmin(explicit_loss_vals)
-plt.scatter(min_idx, explicit_loss_vals[min_idx], color='red', s=60, zorder=10, label=f'{explicit_loss_vals[min_idx]:.2f}')
-plt.plot([l-fisher_factor*f for (l,f) in zip(loss_vals, fisher_vals)], label=f'Implicit Loss')
-plt.plot(loss_vals, label=f'Implicit Loss + {fisher_factor}*Fisher')
-plt.axhline(0, color='black', linestyle='dotted', linewidth=1)
-plt.xlabel('Iteration')
-plt.title(f'Training on Implicit Loss + {fisher_factor}*Fisher')
-plt.legend()
-plt.show()
-
-plt.figure(figsize=(8, 4))
-plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
-plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
-
-for i, idx in enumerate(rand_indices):
-    p_rand = x[idx]
-    s_dir_rand = -score_model(p_rand.reshape(1,2)).flatten()
-    f_score_val = -f_score_vals[idx]
-    s_label = '-learned score' if i == 0 else None
-    f_label = '-true score' if i == 0 else None
-    
-    plt.arrow(p_rand[0], p_rand[1], s_dir_rand[0], s_dir_rand[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=s_label)
-    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
-    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
-
-plt.legend(loc='upper right')
-plt.axis('off')
-plt.title(f'Learned score after {trainsteps} steps on implicit loss + {fisher_factor}*Fisher')
-plt.show()
 
 #%%
 # DDPM-style noise prediction loss
@@ -383,53 +317,85 @@ class CondMLP(nnx.Module):
             h = self.act(layer(h))
         return self.out(h)
 
-def ddpm_loss(model, x, rng, σ_min=0.01, σ_max=10.0):
+@nnx.jit
+def dsm_loss(model, x, rng, σ_min=0.01, σ_max=1.0):
     k_σ, k_ε = jrandom.split(rng)
+    σ = jrandom.uniform(k_σ, shape=(x.shape[0],1), minval=σ_min, maxval=σ_max)
+    ε        = jrandom.normal(k_ε, x.shape)
+    x_noisy  = x + σ * ε
+    pred     = model(x_noisy, σ)
+    return 0.5 * jnp.mean(jnp.sum((pred + ε/σ)**2, -1) * σ**2)
 
-    log_σ = jrandom.uniform(
-        k_σ,
-        shape=(x.shape[0], 1),
-        dtype=x.dtype,                         # <-- real dtype
-        minval=jnp.log(σ_min),
-        maxval=jnp.log(σ_max),
-    )
-    σ       = jnp.exp(log_σ)
+@nnx.jit
+def explicit_loss(model, x, f_score_x, σ=0.5):
+    pred = model(x, σ)
+    return jnp.sum((pred - f_score_x) ** 2) / x.shape[0]
 
-    ε       = jrandom.normal(k_ε, x.shape, dtype=x.dtype)
-    x_noisy = x + σ * ε
-
-    pred   = model(x_noisy, σ)
-    target = -ε / σ
-    return jnp.mean(jnp.sum((pred - target) ** 2, axis=-1))
-
-# Train on DDPM loss
-score_model = CondMLP(d_x=2, hidden_units=[128, 128, 128])
-optimizer = nnx.Optimizer(score_model, optax.adamw(0.0005, 0.9))
-loss_vals = []
-explicit_loss_vals = []
-fisher_vals = []
-
-trainsteps = 300
-rng = jrandom.PRNGKey(0)
-loss = ddpm_loss
-for i in trange(trainsteps):
+@nnx.jit(static_argnames=('loss'))
+def train_step(model, optimizer, loss, x, rng):
+    """Single training step. Returns loss, rng, grad norm."""
     rng, step_rng = jrandom.split(rng)
-
-    loss_val = loss(score_model, x, step_rng)   # ← same key
-    loss_vals.append(loss_val)
-    explicit_loss_val = jnp.sum(jnp.square(score_model(x, 0.01) - f_score(x))) / x.shape[0]
-    explicit_loss_vals.append(explicit_loss_val)
-
-    loss_value, grads = nnx.value_and_grad(loss)(score_model, x, step_rng)
+    loss_val, grads = nnx.value_and_grad(loss)(model, x, step_rng)
+    grad_norm = jnp.sqrt(sum([jnp.sum(jnp.square(g)) for g in jax.tree_util.tree_leaves(grads)]))
     optimizer.update(grads)
+    return loss_val, rng, grad_norm
 
-plt.plot(explicit_loss_vals, label=f'Explicit Loss, avg={np.mean(explicit_loss_vals):.2f}')
-min_idx = np.argmin(explicit_loss_vals)
-plt.scatter(min_idx, explicit_loss_vals[min_idx], color='red', s=60, zorder=10, label=f'{explicit_loss_vals[min_idx]:.2f}')
-plt.plot(loss_vals, label=f'DDPM Loss')
+# Train
+loss, loss_name = dsm_loss, 'DSM Loss'
+score_model = CondMLP(d_x=2, hidden_units=[128, 128, 128])
+# optimizer = nnx.Optimizer(score_model, optax.adam(2e-3, 0.99))
+optimizer = nnx.Optimizer(score_model, optax.chain(optax.clip_by_global_norm(0.01), optax.adamw(1e-3, b1=0.9, b2=0.99),))
+
+sigmas = [0.5, 1.0, 2.0]
+explicit_loss_vals = {sigma: [] for sigma in sigmas}
+loss_vals = []
+fisher_vals = []
+grad_norms = []
+
+trainsteps = 5000
+rng = jrandom.PRNGKey(0)
+f_score_x = f_score(x)  # true score
+
+for i in trange(trainsteps):
+    loss_val, rng, grad_norm = train_step(score_model, optimizer, loss, x, rng)
+    loss_vals.append(loss_val)
+    for sigma in sigmas:
+        explicit_loss_vals[sigma].append(explicit_loss(score_model, x, f_score_x, sigma))
+    grad_norms.append(grad_norm)
+
+# Compute EMA of loss_vals with smoothing=0.95
+def ema(values, smoothing=0.95):
+    ema_vals = []
+    prev = values[0]
+    for v in values:
+        prev = smoothing * prev + (1 - smoothing) * v
+        ema_vals.append(prev)
+    return np.array(ema_vals)
+
+#%%
+plt.figure(figsize=(8, 2.5))
+plt.plot(loss_vals, label=f'{loss_name}')
+plt.plot(ema(loss_vals, 0.95), label=f'EMA(0.95) {loss_name}')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(8, 2.5))
+for sigma in sigmas:
+    vals = explicit_loss_vals[sigma]
+    plt.plot(vals, label=f'MSE σ={sigma}, avg={np.mean(vals):.2f}')
+    ema_explicit = ema(vals, 0.99)
+    plt.plot(ema_explicit, label=f'EMA(0.99) σ={sigma}')
+    min_idx = np.argmin(ema_explicit)
+    plt.scatter(min_idx, ema_explicit[min_idx], color='red', s=60, zorder=10, label=f'σ={sigma} min={ema_explicit[min_idx]:.2f}')
 plt.axhline(0, color='black', linestyle='dotted', linewidth=1)
 plt.xlabel('Iteration')
-plt.title(f'Training on DDPM Loss')
+plt.title(f'Training on {loss_name} (Explicit Loss for each σ)')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(8, 2.5))
+plt.plot(grad_norms, label='Gradient Norm')
+plt.plot(ema(grad_norms, 0.99), label='EMA(0.99) Gradient Norm')
 plt.legend()
 plt.show()
 
@@ -439,7 +405,7 @@ plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
 
 for i, idx in enumerate(rand_indices):
     p_rand = x[idx]
-    s_dir_rand = -score_model(p_rand.reshape(1,2), 0.01).flatten()
+    s_dir_rand = -score_model(p_rand.reshape(1,2), 0.5).flatten()
     f_score_val = -f_score_vals[idx]
     s_label = '-learned score' if i == 0 else None
     f_label = '-true score' if i == 0 else None
@@ -450,5 +416,7 @@ for i, idx in enumerate(rand_indices):
 
 plt.legend(loc='upper right')
 plt.axis('off')
-plt.title(f'Learned score after {trainsteps} steps on DDPM loss')
+plt.title(f'Learned score after {trainsteps} steps on {loss_name}')
 plt.show()
+
+# %%
