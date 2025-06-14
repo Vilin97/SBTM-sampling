@@ -1,4 +1,7 @@
 # %%
+import os
+os.environ["JAX_TRACEBACK_FILTERING"] = "off"
+
 import jax
 import jax.numpy as jnp
 import jax.random as jrandom
@@ -6,7 +9,6 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tqdm import trange
-import numpy as np
 
 from sbtm import distribution 
 from sbtm import models, losses, sampler
@@ -239,3 +241,75 @@ for sigma in kde_sigmas:
     print(f"KDE bandwidth σ={sigma}: Explicit Loss={explicit_loss_vals_kde[sigma]:.4f}")
 
 # %%
+# --- Bandwidth function ---
+def compute_bandwidths(all_x, k=10):
+    """
+    Compute per-point bandwidths using average distance to k nearest neighbors.
+    all_x: (N, d)
+    Returns: (N,) array of bandwidths
+    """
+    # Compute full pairwise distances
+    diffs = all_x[:, None, :] - all_x[None, :, :]    # (N, N, d)
+    dists = jnp.linalg.norm(diffs, axis=-1)          # (N, N)
+    # Exclude self (set diagonal to large value)
+    dists = dists + jnp.eye(all_x.shape[0]) * 1e6
+    # Find k smallest distances per point (axis 1)
+    nearest = jnp.sort(dists, axis=1)[:, :k]
+    return jnp.mean(nearest, axis=1)                 # (N,)
+
+# --- KDE density and score functions ---
+def kde_density(x_query, x_train, sigmas):
+    """
+    Evaluate adaptive KDE at x_query using per-point sigmas.
+    x_query: (M, d)
+    x_train: (N, d)
+    sigmas: (N,) bandwidths per training point
+    Returns: (M,) KDE values
+    """
+    def eval_single(xq):
+        diffs = xq - x_train            # (N, d)
+        norms = jnp.sum(diffs ** 2, axis=1)  # (N,)
+        kernels = jnp.exp(-norms / (2 * sigmas**2)) / ((2 * jnp.pi)**(xq.shape[0]/2) * sigmas**xq.shape[0])
+        return jnp.mean(kernels)
+    return jax.vmap(eval_single)(x_query)
+
+def kde_score(x_query, x_train, sigmas):
+    """
+    Score = ∇ log p(x). Gradient of log-density estimate.
+    x_query: (M, d)
+    Returns: (M, d)
+    """
+    def log_density(xq):
+        return jnp.log(kde_density(xq[None, :], x_train, sigmas) + 1e-12)[0]
+    return jax.vmap(jax.grad(log_density))(x_query)
+
+# --- Main experiment ---
+"Experiment: Adaptive KDE score approximation vs true score"
+explicit_loss_vals_kde = {}
+
+all_x = jnp.array(x)
+bandwidths = compute_bandwidths(all_x, k=10)
+kde_score_vals = kde_score(all_x, all_x, bandwidths)
+explicit_loss = jnp.mean(jnp.sum((kde_score_vals - jnp.array(f_score_vals))**2, axis=1))
+explicit_loss_vals_kde["adaptive"] = float(explicit_loss)
+
+# Scatterplot: compare KDE score and true score
+plt.figure(figsize=(8, 4))
+plt.contourf(xx, yy, f_vals, levels=30, alpha=0.5, cmap='Greens')
+plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
+for i, idx in enumerate(rand_indices):
+    p_rand = x[idx]
+    kde_score_val = -kde_score_vals[idx]
+    f_score_val = -f_score_vals[idx]
+    kde_label = '-KDE score' if i == 0 else None
+    f_label = '-true score' if i == 0 else None
+    plt.arrow(p_rand[0], p_rand[1], f_score_val[0], f_score_val[1], color='red', width=0.01, head_width=0.07, length_includes_head=True, label=f_label)
+    plt.arrow(p_rand[0], p_rand[1], kde_score_val[0], kde_score_val[1], color='green', width=0.01, head_width=0.07, length_includes_head=True, label=kde_label)
+    plt.scatter([p_rand[0]], [p_rand[1]], c='yellow', s=60, edgecolors='k', zorder=5)
+plt.legend(loc='upper right')
+plt.axis('off')
+plt.title(f'Adaptive KDE score, Explicit Loss={explicit_loss:.3f}')
+plt.show()
+
+# Print explicit loss
+print(f"Adaptive KDE: Explicit Loss={explicit_loss:.4f}")
