@@ -17,7 +17,6 @@ from flax import nnx
 import os
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-
 # %%
 "Sample Gaussian Mixture"
 f_dist = distribution.GaussianMixture([jnp.array([-2.5,0]), jnp.array([2.5,0])], [jnp.eye(2), jnp.eye(2)], [0.5, 0.5])
@@ -115,7 +114,7 @@ def ema(values, smoothing=0.95):
     for v in values:
         prev = smoothing * prev + (1 - smoothing) * v
         ema_vals.append(prev)
-    return np.array(ema_vals)
+    return ema_vals
 
 #%%
 plt.figure(figsize=(8, 2.5))
@@ -126,17 +125,17 @@ plt.show()
 
 plt.figure(figsize=(8, 2.5))
 plt.plot(grad_norms, label='Gradient Norm')
-plt.plot(ema(grad_norms, 0.99), label='EMA(0.99) Gradient Norm')
+plt.plot(ema(grad_norms, 0.95), label='EMA(0.95) Gradient Norm')
 plt.legend()
 plt.show()
 
 plt.figure(figsize=(8, 2.5))
 for sigma in sigmas:
-    vals = explicit_loss_vals[sigma]
-    plt.plot(vals, label=f'MSE σ={sigma}, avg={np.mean(vals):.2f}')
-    ema_explicit = ema(vals, 0.99)
-    plt.plot(ema_explicit, label=f'EMA(0.99) σ={sigma}')
-    min_idx = np.argmin(ema_explicit)
+    vals = jnp.array(explicit_loss_vals[sigma])
+    plt.plot(vals, label=f'MSE σ={sigma}, avg={jnp.mean(vals):.2f}')
+    ema_explicit = ema(vals, 0.95)
+    plt.plot(ema_explicit, label=f'EMA(0.95) σ={sigma}')
+    min_idx = jnp.argmin(jnp.array(ema_explicit))
     plt.scatter(min_idx, ema_explicit[min_idx], color='red', s=60, zorder=10, label=f'σ={sigma} min={ema_explicit[min_idx]:.2f}')
 plt.axhline(0, color='black', linestyle='dotted', linewidth=1)
 plt.xlabel('Iteration')
@@ -150,7 +149,7 @@ plt.scatter(x[:, 0], x[:, 1], c='k', s=10)
 
 for i, idx in enumerate(rand_indices):
     p_rand = x[idx]
-    s_dir_rand = -score_model(p_rand.reshape(1,2), 0.5).flatten()
+    s_dir_rand = -score_model(p_rand.reshape(1,2), 0.1).flatten()
     f_score_val = -f_score_vals[idx]
     s_label = '-learned score' if i == 0 else None
     f_label = '-true score' if i == 0 else None

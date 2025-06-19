@@ -7,7 +7,10 @@ from flax import nnx
 
 @nnx.jit(static_argnames='log_density')
 def score_log_density(log_density, x):
-    return vmap(grad(log_density))(x)
+    if x.ndim == 1:
+        return grad(log_density)(x)
+    elif x.ndim == 2:
+        return vmap(grad(log_density))(x)
 
 class Distribution:
     def __init__(self):
